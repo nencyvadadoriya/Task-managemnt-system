@@ -1,58 +1,75 @@
 const mongoose = require('mongoose');
 
 const taskSchema = new mongoose.Schema({
-    title: {
-        type: String,
-        required: true,
-        trim: true
-    },
-    description: String,
-    assignedTo: {
-        type: mongoose.Schema.Types.Mixed,
-        required: true
-    },
-    assignedBy: {
-        type: mongoose.Schema.Types.Mixed,
-        required: true
-    },
-    dueDate: {
-        type: Date,
-        required: true
-    },
-    priority: {
-        type: String,
-        enum: ['low', 'medium', 'high'],
-        default: 'medium'
-    },
-    status: {
-        type: String,
-        enum: ['pending', 'in-progress', 'completed'],
-        default: 'pending'
-    },
-    taskType: {
-        type: String,
-        enum: ['regular', 'troubleshoot', 'maintenance', 'development'],
-        default: 'regular'
-    },
-    companyName: {
-        type: String,
-        enum: ['company name', 'acs', 'md inpex', 'tech solutions', 'global inc'],
-        default: 'company name'
-    },
-    brand: {
-        type: String,
-        default: ''
-    },
-    createdAt: {
-        type: Date,
-        default: Date.now
-    },
-    updatedAt: {
-        type: Date,
-        default: Date.now
-    },
-    completedApproval: { type: Boolean, default: false },
-
+  title: {
+    type: String,
+    required: [true, 'Task title is required'],
+    trim: true
+  },
+  description: {
+    type: String,
+    trim: true
+  },
+  status: {
+    type: String,
+    enum: ['pending', 'in-progress', 'completed'],
+    default: 'pending'
+  },
+  completedApproval: {
+    type: Boolean,
+    default: false
+  },
+  priority: {
+    type: String,
+    enum: ['high', 'medium', 'low'],
+    default: 'medium'
+  },
+  dueDate: {
+    type: Date,
+    required: [true, 'Due date is required']
+  },
+  assignedTo: {
+    type: String,
+    trim: true,
+    lowercase: true,
+    required: [true, 'Assignee email is required']
+  },
+  assignedBy: {
+    type: String,
+    trim: true,
+    lowercase: true,
+    required: [true, 'Assigner email is required']
+  },
+  // Store comment references
+  comments: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Comment',
+    default: []
+  }],
+  // Store history references
+  // ✅ Store history references
+  history: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'TaskHistory',
+    default: []
+  }]
+}, {
+  timestamps: true,
+  versionKey: false
 });
 
-module.exports = mongoose.model('Task', taskSchema);
+// Indexes
+taskSchema.index({ status: 1 });
+taskSchema.index({ dueDate: 1 });
+taskSchema.index({ assignedTo: 1 });
+taskSchema.index({ assignedBy: 1 });
+taskSchema.index({ completedApproval: 1 });
+
+// Virtual for comment count
+taskSchema.virtual('commentCount').get(function() {
+  return this.comments?.length || 0;
+});
+
+const Task = mongoose.model('Task', taskSchema);
+
+module.exports = Task;

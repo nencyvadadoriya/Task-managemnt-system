@@ -1,40 +1,71 @@
-// src/Types.ts
-export type TaskStatus = 'todo' | 'in-progress' | 'completed' | 'pending';
+export type TaskStatus =  'in-progress' | 'completed' | 'pending';
 export type TaskPriority = 'low' | 'medium' | 'high';
 
+// Types/Types.ts file mein Task interface mein add karein:
 export interface Task {
   id: string;
   title: string;
-  description: string;
-  assignedTo: string;
-  assignedBy: string;
+  description?: string;
   dueDate: string;
-  priority: TaskPriority;
-  status: TaskStatus;
-  taskType: string;
-  companyName: string;
-  brand?: string; // ✅ BRAND FIELD ADD HERE
-  assignedToUser?: {
-    id: string;
-    name: string;
-    email: string;
-  };
-  history?: TaskHistory[];
+  status: 'pending' | 'in-progress' | 'completed' | 'cancelled' | 'on-hold';
+  priority?: 'low' | 'medium' | 'high' | 'urgent';
+  assignedTo: string | UserType;
+  assignedBy?: string | UserType;
   createdAt: string;
-  updatedAt: string;
-  completionType?: 'user' | 'admin'; 
-  completedBy?: string; 
-  reassignedBy?: string;
+  updatedAt?: string;
   completedApproval?: boolean;
-  comments?: CommentType[]; // ✅ Comments array bhi add karo agar use ho raha hai
+  history?: TaskHistory[];
+  comments?: CommentType[];
+  
+  category?: string;
+  tags?: string[];
+  type?: string;          // 'regular', 'troubleshoot', 'maintenance', 'development'
+  company?: string;       // 'acs', 'md inpex', 'tech solutions', 'global inc'
+  brand?: string;         // 'chips', 'soy', 'saffola', etc.
+  project?: string;       // Project name
+  assignedToUser?: UserType;
 }
 
 export interface TaskHistory {
   id: string;
   taskId: string;
-  action: 'created' | 'reassigned' | 'completed' | 'pending' | 
-          'status_changed' | 'priority_changed' | 'due_date_changed' | 
-          'edited' | 'user_completed' | 'admin_completed' | 'user_reassigned' | 'admin_reassigned';
+  action:
+    | 'created'
+    | 'reassigned'
+    | 'completed'
+    | 'pending'
+    | 'status_changed'
+    | 'priority_changed'
+    | 'due_date_changed'
+    | 'edited'
+    | 'task_edited'
+    | 'task_deleted'
+    | 'task_reassigned'
+    | 'user_completed'
+    | 'admin_completed'
+    | 'user_reassigned'
+    | 'admin_reassigned'
+    | 'admin_approved'
+    | 'admin_rejected'
+    | 'rejected_by_admin'
+    | 'assigner_permanent_approved'
+    | 'permanent_approval_removed'
+    | 'assigner_approval_removed'
+    | 'bulk_completed'
+    | 'bulk_pending'
+    | 'marked_pending'
+    | 'marked_completed'
+    | 'comment_added'
+    | 'comment_deleted'
+    | 'status_completed_by_admin'
+    | 'status_completed_by_assigner'
+    | 'status_completed_by_assignee'
+    | 'status_pending_by_admin'
+    | 'status_pending_by_assigner'
+    | 'status_pending_by_assignee'
+    | 'approval_granted'
+    | 'approval_revoked'
+    | 'assigner_recheck_requested';
   userId: string;
   userName: string;
   userEmail: string;
@@ -42,6 +73,9 @@ export interface TaskHistory {
   newValue?: string;
   description?: string;
   timestamp: string;
+  oldStatus?: string;
+  newStatus?: string;
+  note?: string;
 }
 
 export interface CommentType {
@@ -101,10 +135,8 @@ export interface LoginBody {
 export interface RegisterUserBody {
     name: string;
     email: string;
-    about: string;
     password: string;
-    gender: string;
-    profile_image: File | null;
+    role: 'admin' | 'user';
 }
 
 export interface OtpverifyPayload {
@@ -112,7 +144,6 @@ export interface OtpverifyPayload {
     OTP: string;
 }
 
-// ✅ NewTaskForm interface add karo agar zaroorat ho
 export interface NewTaskForm {
     title: string;
     description: string;
@@ -121,16 +152,47 @@ export interface NewTaskForm {
     priority: TaskPriority;
     taskType: string;
     companyName: string;
-    brand: string; // ✅ Yahan bhi add karo
+    brand: string; 
 }
 
-// ✅ FilterState interface add karo
-export interface FilterState {
-    status: string;
-    priority: string;
-    assigned: string;
-    date: string;
-    taskType: string;
-    company: string;
-    brand: string;
+export type CompanyFilterValue = 'all' | 'company-a' | 'company-b' | 'company-c' | 'company-d';
+export type StatusFilterValue = 'all' | 'pending' | 'in-progress' | 'completed' | 'overdue';
+export type PriorityFilterValue = 'all' | 'high' | 'medium' | 'low';
+
+export type DateRangePresetValue = 'all' | 'today' | 'this-week' | 'this-month' | 'custom';
+export interface DateRangeFilterValue {
+    preset: DateRangePresetValue;
+    from?: string;
+    to?: string;
+}
+
+export type LastUpdatedPresetValue = 'all' | '24h' | '7d' | '30d' | 'custom';
+export interface LastUpdatedFilterValue {
+    preset: LastUpdatedPresetValue;
+    from?: string;
+    to?: string;
+}
+
+export interface TaskFilterState {
+    company: CompanyFilterValue;
+    status: StatusFilterValue;
+    priority: PriorityFilterValue;
+    assignedTo: string[];
+    dateRange: DateRangeFilterValue;
+    search: string;
+    createdBy: string[];
+    lastUpdated: LastUpdatedFilterValue;
+}
+
+export interface TaskFilterPreset {
+    id: string;
+    name: string;
+    filters: TaskFilterState;
+    updatedAt: string;
+}
+
+export interface SignupBody {
+  name: string;
+  email: string;
+  password: string;
 }

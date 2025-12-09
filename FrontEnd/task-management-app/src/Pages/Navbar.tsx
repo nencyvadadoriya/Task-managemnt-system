@@ -1,5 +1,5 @@
 // components/Navbar.tsx
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Menu, Search, LogOut } from 'lucide-react';
 import type { UserType } from '../Types/Types';
 
@@ -23,15 +23,7 @@ const Navbar: React.FC<NavbarProps> = ({
   handleLogout
 }) => {
   
-  // Debug effect - remove after fixing
-  useEffect(() => {
-    console.log("🔄 Navbar received currentUser:", currentUser);
-    console.log("📝 Name:", currentUser?.name);
-    console.log("📧 Email:", currentUser?.email);
-    console.log("🆔 ID:", currentUser?.id);
-  }, [currentUser]);
-
-  // Get display avatar (first letter)
+ // Get display avatar (first letter)
   const getDisplayAvatar = () => {
     if (!currentUser) return 'U';
     

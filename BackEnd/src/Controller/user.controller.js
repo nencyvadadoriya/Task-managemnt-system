@@ -7,8 +7,14 @@ const { sendOtpEmail } = require('../middleware/email.message');
 // Register user
 exports.registerUser = async (req, res) => {
     try {
-        const { name, email, password, role } = req.body;
+        const { name, email, password } = req.body;
 
+        if (!name || !email || !password) {
+            return res.status(400).json({
+                success: false,
+                message: 'Name, email and password are required'
+            });
+        }
         // Check if user exists
         const existUser = await User.findOne({ email });
         if (existUser) {
@@ -16,7 +22,7 @@ exports.registerUser = async (req, res) => {
                 success: false,
                 message: 'User already exists'
             });
-        }
+        }   
 
         // Hash password
         const hashedPassword = await bcrypt.hash(password, 10);
@@ -26,27 +32,39 @@ exports.registerUser = async (req, res) => {
             name,
             email,
             password: hashedPassword,
-            role: role || 'user',
             createdAt: new Date(),
             updatedAt: new Date()
         });
 
         await newUser.save();
 
-        // Remove password from response
-        newUser.password = undefined;
+        const userPayload = {
+            id: newUser._id,
+            name: newUser.name,
+            email: newUser.email,
+        };
+
+        const token = jwt.sign(
+            userPayload,
+            process.env.JWT_SECRET || 'secret',
+            { expiresIn: '24h' }
+        );
 
         res.status(201).json({
             success: true,
             message: 'User registered successfully',
-            data: newUser
+            result: {
+                token,
+                user: userPayload
+            }
         });
 
     } catch (error) {
         console.error('Error registering user:', error);
         res.status(500).json({
             success: false,
-            message: 'Error registering user'
+            message: 'Error registering user',
+            error: error.message
         });
     }
 };
@@ -55,13 +73,9 @@ exports.registerUser = async (req, res) => {
 exports.loginUser = async (req, res) => {
     try {
         const { email, password } = req.body;
-
-        console.log("🔐 Login attempt for:", email);
-
-        // Find user
+                // Find user
         const user = await User.findOne({ email });
         if (!user) {
-            console.log("❌ User not found:", email);
             return res.status(400).json({
                 error: true,
                 msg: 'User not found'
@@ -71,7 +85,6 @@ exports.loginUser = async (req, res) => {
         // Check password
         const matchPassword = await bcrypt.compare(password, user.password);
         if (!matchPassword) {
-            console.log("❌ Wrong password for:", email);
             return res.status(400).json({
                 error: true,
                 msg: 'Invalid password'
@@ -80,7 +93,12 @@ exports.loginUser = async (req, res) => {
 
         // Create token
         const token = jwt.sign(
-            { id: user._id, email: user.email },
+            {
+                id: user._id,
+                email: user.email,
+                name: user.name,
+                role: user.role
+            },
             process.env.JWT_SECRET || 'secret',
             { expiresIn: '24h' }
         );
@@ -118,9 +136,6 @@ exports.loginUser = async (req, res) => {
 exports.forgetPassword = async (req, res) => {
     try {
         const { email } = req.body;
-
-        console.log('🔐 Forget Password Request:', email);
-
         if (!email) {
             return res.status(400).json({
                 success: false,
@@ -337,36 +352,21 @@ exports.getAllUsers = async (req, res) => {
 
 exports.currentUser = async (req, res) => {
     try {
-        console.log("🔍 Current User Controller Called");
-        console.log("📌 User from middleware:", req.user);
-
-        // Middleware se user id
-        // YOUR TOKEN में देखें: आपके token में 'id' field है
         const token = req.header('Authorization')?.replace('Bearer ', '');
         console.log("🔐 Full token:", token);
 
         if (token) {
             const decoded = jwt.decode(token);
             console.log("🔓 Decoded token:", decoded);
-            // decoded में देखें: { id: '692ecbf2e077030d91979928', email: 'v...' }
         }
-
-        // आपके token में 'id' field है, 'userId' नहीं
-        const userId = req.user.id; // ✅ 'id' use करें, 'userId' नहीं
-
-        console.log("👤 User ID from token:", userId);
-
+        const userId = req.user.id; 
         if (!userId) {
             return res.status(400).json({
                 error: true,
                 msg: "User ID not found in request"
             });
         }
-
-        // User find करें
         const user = await User.findById(userId).select('-password -__v');
-
-        console.log("📊 Database User found:", user);
 
         if (!user) {
             return res.status(404).json({
@@ -405,7 +405,6 @@ exports.currentUser = async (req, res) => {
 
     } catch (error) {
         console.error("❌ Current User Error:", error);
-        console.error("❌ Error stack:", error.stack);
         return res.status(500).json({
             error: true,
             msg: "Internal server error",
@@ -423,7 +422,6 @@ exports.approve = async (req, res) => {
             id,
             {
                 completedApproval,
-                // Agar permanent approve kiya hai to status bhi completed set karo
                 ...(completedApproval && { status: 'completed' })
             },
             { new: true }

@@ -1,16 +1,35 @@
 import React, { useState } from 'react';
-import { ChevronLeft, ChevronRight, MoreVertical } from 'lucide-react';
-import type { Task } from '../Types/Types';
+import { ChevronLeft, ChevronRight, MoreVertical, CheckCircle, XCircle } from 'lucide-react';
+import type { Task, TaskStatus, UserType } from '../Types/Types';
 
 interface CalendarViewProps {
   tasks: Task[];
-  onEditTask: (task: Task) => void;
-  onDeleteTask: (taskId: string) => void;
+  currentUser: UserType;
+  handleToggleTaskStatus: (taskId: string, currentStatus: TaskStatus) => Promise<void>;
+  handleDeleteTask: (taskId: string) => Promise<void>;
+  handleUpdateTask: (taskId: string, updatedData: Partial<Task>) => Promise<void>;
+  canEditDeleteTask: (task: Task) => boolean;
+  canMarkTaskDone: (task: Task) => boolean;
+  getAssignedUserInfo: (task: Task) => { name: string; email: string };
+  formatDate: (dateString: string) => string;
+  isOverdue: (dueDate: string, status: string) => boolean;
 }
 
-const CalendarView: React.FC<CalendarViewProps> = ({ tasks, onEditTask, onDeleteTask }) => {
+const CalendarView: React.FC<CalendarViewProps> = ({
+  tasks,
+  currentUser,
+  handleToggleTaskStatus,
+  handleDeleteTask,
+  handleUpdateTask,
+  canEditDeleteTask,
+  canMarkTaskDone,
+  getAssignedUserInfo,
+  formatDate,
+  isOverdue
+}) => {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   // Days of week
   const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -39,7 +58,10 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, onEditTask, onDelete
   // Get tasks for a specific date
   const getTasksForDate = (date: Date) => {
     const dateStr = date.toISOString().split('T')[0];
-    return tasks.filter(task => task.dueDate === dateStr);
+    return tasks.filter(task => {
+      const taskDueDate = new Date(task.dueDate).toISOString().split('T')[0];
+      return taskDueDate === dateStr;
+    });
   };
 
   // Format month and year
@@ -83,23 +105,63 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, onEditTask, onDelete
     }
   };
 
+  // Get priority text color
+  const getPriorityTextColor = (priority: string) => {
+    switch (priority) {
+      case 'high': return 'text-red-700';
+      case 'medium': return 'text-yellow-700';
+      case 'low': return 'text-green-700';
+      default: return 'text-blue-700';
+    }
+  };
+
+  // Get status color
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'completed': return 'bg-green-100 text-green-800';
+      case 'in-progress': return 'bg-blue-100 text-blue-800';
+      case 'pending': return 'bg-yellow-100 text-yellow-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
   // Selected date tasks
   const selectedDateTasks = selectedDate ? getTasksForDate(selectedDate) : [];
+
+  // Handle edit task
+  const handleEditTask = (task: Task) => {
+    handleUpdateTask(task.id, task);
+  };
+
+  // Handle delete task with confirmation
+  const handleDeleteWithConfirmation = async (taskId: string) => {
+    if (window.confirm('Are you sure you want to delete this task?')) {
+      await handleDeleteTask(taskId);
+    }
+  };
+
+  // Handle toggle task status
+  const handleToggleStatus = async (taskId: string, currentStatus: TaskStatus) => {
+    await handleToggleTaskStatus(taskId, currentStatus);
+  };
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Calendar</h1>
-          <p className="text-gray-500">Manage your tasks schedule</p>
+          <h1 className="text-2xl font-bold text-gray-900">Calendar View</h1>
+          <p className="text-gray-500">Manage your tasks schedule visually</p>
+        </div>
+        <div className="text-sm text-gray-600">
+          Logged in as: <span className="font-semibold">{currentUser.name}</span>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Calendar */}
         <div className="lg:col-span-2">
-          <div className="bg-white shadow rounded-lg">
+          <div className="bg-white shadow rounded-lg border border-gray-200">
             {/* Calendar Header */}
             <div className="p-6 border-b">
               <div className="flex items-center justify-between">
@@ -107,19 +169,19 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, onEditTask, onDelete
                 <div className="flex items-center space-x-2">
                   <button
                     onClick={prevMonth}
-                    className="p-2 hover:bg-gray-100 rounded-lg"
+                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                   >
                     <ChevronLeft className="h-5 w-5" />
                   </button>
                   <button
                     onClick={() => setCurrentMonth(new Date())}
-                    className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg"
+                    className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
                   >
                     Today
                   </button>
                   <button
                     onClick={nextMonth}
-                    className="p-2 hover:bg-gray-100 rounded-lg"
+                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                   >
                     <ChevronRight className="h-5 w-5" />
                   </button>
@@ -147,13 +209,16 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, onEditTask, onDelete
                     <div
                       key={index}
                       className={`min-h-32 bg-white p-2 cursor-pointer transition-all duration-200 ${!isCurrentMonth ? 'bg-gray-50' : ''
-                        } ${isSelected ? 'ring-2 ring-blue-500' : ''} ${isToday ? 'bg-blue-50' : ''
+                        } ${isSelected ? 'ring-2 ring-blue-500' : ''
+                        } ${isToday ? 'bg-blue-50' : ''
                         } hover:bg-gray-50`}
                       onClick={() => setSelectedDate(date)}
                     >
                       <div className="flex justify-between items-start">
-                        <span className={`text-sm font-medium ${isCurrentMonth ? 'text-gray-900' : 'text-gray-400'
-                          } ${isToday ? 'text-blue-600' : ''}`}>
+                        <span
+                          className={`text-sm font-medium ${isCurrentMonth ? 'text-gray-900' : 'text-gray-400'
+                            } ${isToday ? 'text-blue-600 font-bold' : ''}`}
+                        >
                           {date.getDate()}
                         </span>
                         {dateTasks.length > 0 && (
@@ -168,12 +233,17 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, onEditTask, onDelete
                         {dateTasks.slice(0, 3).map(task => (
                           <div
                             key={task.id}
-                            className={`text-xs p-1 rounded truncate ${getPriorityColor(task.priority)} bg-opacity-20`}
+                            className={`text-xs p-1 rounded truncate ${getPriorityColor(task.priority)
+                              } bg-opacity-20 ${getPriorityTextColor(task.priority)}`}
                             title={`${task.title} - ${task.priority} priority`}
                           >
                             <div className="flex items-center">
-                              <div className={`w-2 h-2 rounded-full ${getPriorityColor(task.priority)} mr-1`}></div>
-                              <span className="truncate">{task.title}</span>
+                              <div
+                                className={`w-2 h-2 rounded-full ${getPriorityColor(
+                                  task.priority
+                                )} mr-1`}
+                              ></div>
+                              <span className="truncate font-medium">{task.title}</span>
                             </div>
                           </div>
                         ))}
@@ -191,19 +261,19 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, onEditTask, onDelete
 
             {/* Legend */}
             <div className="p-4 bg-gray-50 rounded-b-lg">
-              <div className="flex items-center space-x-4">
-                <span className="text-sm text-gray-600">Legend:</span>
-                <div className="flex items-center space-x-2">
+              <div className="flex flex-wrap items-center gap-4">
+                <span className="text-sm font-medium text-gray-700">Legend:</span>
+                <div className="flex flex-wrap items-center gap-3">
                   <div className="flex items-center">
-                    <div className="w-3 h-3 rounded-full bg-red-500 mr-1"></div>
+                    <div className="w-3 h-3 rounded-full bg-red-500 mr-2"></div>
                     <span className="text-xs text-gray-600">High Priority</span>
                   </div>
                   <div className="flex items-center">
-                    <div className="w-3 h-3 rounded-full bg-yellow-500 mr-1"></div>
+                    <div className="w-3 h-3 rounded-full bg-yellow-500 mr-2"></div>
                     <span className="text-xs text-gray-600">Medium Priority</span>
                   </div>
                   <div className="flex items-center">
-                    <div className="w-3 h-3 rounded-full bg-green-500 mr-1"></div>
+                    <div className="w-3 h-3 rounded-full bg-green-500 mr-2"></div>
                     <span className="text-xs text-gray-600">Low Priority</span>
                   </div>
                 </div>
@@ -214,15 +284,17 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, onEditTask, onDelete
 
         {/* Side Panel - Selected Date Tasks */}
         <div className="lg:col-span-1">
-          <div className="bg-white shadow rounded-lg sticky top-6">
+          <div className="bg-white shadow rounded-lg border border-gray-200 sticky top-6">
             <div className="p-6 border-b">
               <h3 className="text-lg font-semibold text-gray-900">
-                {selectedDate ? selectedDate.toLocaleDateString('en-US', {
-                  weekday: 'long',
-                  month: 'long',
-                  day: 'numeric',
-                  year: 'numeric'
-                }) : 'Select a Date'}
+                {selectedDate
+                  ? selectedDate.toLocaleDateString('en-US', {
+                    weekday: 'long',
+                    month: 'long',
+                    day: 'numeric',
+                    year: 'numeric',
+                  })
+                  : 'Select a Date'}
               </h3>
               <p className="text-sm text-gray-500 mt-1">
                 {selectedDateTasks.length} task{selectedDateTasks.length !== 1 ? 's' : ''} scheduled
@@ -233,59 +305,149 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, onEditTask, onDelete
               {selectedDateTasks.length === 0 ? (
                 <div className="text-center py-8">
                   <div className="text-gray-400 mb-2">No tasks scheduled</div>
-                  <p className="text-sm text-gray-500">Select another date or create a new task</p>
+                  <p className="text-sm text-gray-500">
+                    Select another date or create a new task
+                  </p>
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
                   {selectedDateTasks.map(task => (
                     <div
                       key={task.id}
-                      className="p-4 border rounded-lg hover:border-blue-300 transition-colors duration-200"
+                      className="p-4 border border-gray-200 rounded-lg hover:border-blue-300 transition-colors duration-200 bg-white"
                     >
-                      <div className="flex justify-between items-start mb-2">
-                        <h4 className="font-medium text-gray-900">{task.title}</h4>
-                        <div className={`w-3 h-3 rounded-full ${getPriorityColor(task.priority)}`}></div>
+                      <div className="flex justify-between items-start mb-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <h4 className="font-semibold text-gray-900">{task.title}</h4>
+                            {task.completedApproval && (
+                              <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">
+                                ✅ Approved
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 mb-3">
+                            <span
+                              className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(
+                                task.status
+                              )}`}
+                            >
+                              {task.status.replace('-', ' ')}
+                            </span>
+                            <span
+                              className={`px-2 py-1 text-xs font-medium rounded-full ${getPriorityColor(task.priority)
+                                } bg-opacity-20 ${getPriorityTextColor(task.priority)}`}
+                            >
+                              {task.priority} priority
+                            </span>
+                          </div>
+                        </div>
+                        <div
+                          className={`w-3 h-3 rounded-full ${getPriorityColor(
+                            task.priority
+                          )}`}
+                        ></div>
                       </div>
 
                       {task.description && (
-                        <p className="text-sm text-gray-600 mb-3 line-clamp-2">{task.description}</p>
+                        <p className="text-sm text-gray-600 mb-3 line-clamp-2">
+                          {task.description}
+                        </p>
                       )}
 
-                      <div className="flex items-center justify-between text-sm">
-                        <div className="flex items-center space-x-3">
-                          <span className={`px-2 py-1 rounded-full ${task.status === 'completed' ? 'bg-green-100 text-green-800' :
-                            task.status === 'in-progress' ? 'bg-blue-100 text-blue-800' :
-                              'bg-yellow-100 text-yellow-800'
-                            }`}>
-                            {task.status.replace('-', ' ')}
-                          </span>
-                          <span className="text-gray-500">
-                            Due: {new Date(task.dueDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      <div className="text-sm text-gray-600 mb-4 space-y-1">
+                        <div className="flex items-center">
+                          <span className="font-medium mr-2">Assigned to:</span>
+                          <span>{getAssignedUserInfo(task).name}</span>
+                        </div>
+                        <div className="flex items-center">
+                          <span className="font-medium mr-2">Due date:</span>
+                          <span className={`${isOverdue(task.dueDate, task.status) ? 'text-red-600 font-medium' : ''}`}>
+                            {formatDate(task.dueDate)}
+                            {isOverdue(task.dueDate, task.status) && ' (Overdue)'}
                           </span>
                         </div>
+                        {task.companyName && (
+                          <div className="flex items-center">
+                            <span className="font-medium mr-2">Company:</span>
+                            <span>{task.companyName}</span>
+                          </div>
+                        )}
+                        {task.brand && (
+                          <div className="flex items-center">
+                            <span className="font-medium mr-2">Brand:</span>
+                            <span>{task.brand}</span>
+                          </div>
+                        )}
+                      </div>
 
-                        <div className="relative group">
-                          <button className="p-1 hover:bg-gray-100 rounded">
+                      <div className="flex items-center justify-between pt-3 border-t border-gray-100">
+                        <button
+                          onClick={() => handleToggleStatus(task.id, task.status)}
+                          disabled={!canMarkTaskDone(task)}
+                          className={`px-3 py-1.5 text-sm font-medium rounded-lg flex items-center gap-1 transition-colors ${canMarkTaskDone(task)
+                              ? task.status === 'completed'
+                                ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                                : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                              : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                            }`}
+                        >
+                          {task.status === 'completed' ? (
+                            <>
+                              <XCircle className="h-4 w-4" />
+                              Mark Pending
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle className="h-4 w-4" />
+                              Mark Complete
+                            </>
+                          )}
+                        </button>
+
+                        <div className="relative">
+                          <button
+                            onClick={() =>
+                              setOpenMenuId(openMenuId === task.id ? null : task.id)
+                            }
+                            className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+                          >
                             <MoreVertical className="h-4 w-4 text-gray-500" />
                           </button>
-                          <div className="absolute right-0 mt-1 w-32 bg-white rounded-md shadow-lg hidden group-hover:block z-10 border border-gray-200">
-                            <button
-                              onClick={() => onEditTask(task)}
-                              className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => {
-                                if (window.confirm('Delete this task?')) {
-                                  onDeleteTask(task.id);
-                                }
-                              }}
-                              className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100"
-                            >
-                              Delete
-                            </button>
-                          </div>
+
+                          {openMenuId === task.id && (
+                            <div className="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg z-10 border border-gray-200">
+                              {canEditDeleteTask(task) && (
+                                <button
+                                  onClick={() => {
+                                    handleEditTask(task);
+                                    setOpenMenuId(null);
+                                  }}
+                                  className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                                >
+                                  Edit Task
+                                </button>
+                              )}
+                              {canEditDeleteTask(task) && (
+                                <button
+                                  onClick={() => {
+                                    handleDeleteWithConfirmation(task.id);
+                                    setOpenMenuId(null);
+                                  }}
+                                  className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+                                >
+                                  Delete Task
+                                </button>
+                              )}
+                              <div className="border-t border-gray-100"></div>
+                              <button
+                                onClick={() => setOpenMenuId(null)}
+                                className="block w-full text-left px-4 py-2 text-sm text-gray-500 hover:bg-gray-100"
+                              >
+                                Close
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -294,30 +456,31 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, onEditTask, onDelete
               )}
 
               {/* Quick Stats */}
-              <div className="mt-8 pt-6 border-t">
+              <div className="mt-8 pt-6 border-t border-gray-200">
                 <h4 className="font-medium text-gray-900 mb-3">Month Overview</h4>
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="bg-blue-50 p-3 rounded-lg text-center">
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-blue-50 p-3 rounded-lg text-center border border-blue-100">
                     <div className="text-lg font-bold text-blue-600">
                       {tasks.filter(t => t.status === 'completed').length}
                     </div>
-                    <div className="text-xs text-blue-800">Completed</div>
+                    <div className="text-xs text-blue-800 font-medium">Completed</div>
                   </div>
-                  <div className="bg-yellow-50 p-3 rounded-lg text-center">
+                  <div className="bg-yellow-50 p-3 rounded-lg text-center border border-yellow-100">
                     <div className="text-lg font-bold text-yellow-600">
                       {tasks.filter(t => t.status === 'in-progress').length}
                     </div>
-                    <div className="text-xs text-yellow-800">In Progress</div>
+                    <div className="text-xs text-yellow-800 font-medium">In Progress</div>
                   </div>
-                  <div className="bg-red-50 p-3 rounded-lg text-center">
+                  <div className="bg-red-50 p-3 rounded-lg text-center border border-red-100">
                     <div className="text-lg font-bold text-red-600">
                       {tasks.filter(t => {
                         const dueDate = new Date(t.dueDate);
                         const today = new Date();
+                        today.setHours(0, 0, 0, 0);
                         return dueDate < today && t.status !== 'completed';
                       }).length}
                     </div>
-                    <div className="text-xs text-red-800">Overdue</div>
+                    <div className="text-xs text-red-800 font-medium">Overdue</div>
                   </div>
                 </div>
               </div>
