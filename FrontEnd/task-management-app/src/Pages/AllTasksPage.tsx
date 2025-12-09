@@ -22,7 +22,10 @@ import {
   Search,
   Download,
   Upload,
+  AlertTriangle,
+  FileText,
 } from 'lucide-react';
+
 import type { Task, UserType, CommentType, TaskHistory } from '../Types/Types';
 import toast from 'react-hot-toast';
 import { useEffect, useMemo, useCallback, useState, memo } from 'react';
@@ -58,6 +61,56 @@ interface AllTasksPageProps {
   onApproveTask?: (taskId: string, approve: boolean) => Promise<void>;
   onUpdateTaskApproval?: (taskId: string, completedApproval: boolean) => Promise<void>;
   onFetchTaskHistory?: (taskId: string) => Promise<TaskHistory[]>;
+  onBulkCreateTasks?: (tasks: BulkTaskPayload[]) => Promise<BulkCreateResult>;
+}
+
+type BulkPriority = 'low' | 'medium' | 'high' | 'urgent';
+
+interface BulkTaskPayload {
+  title: string;
+  description?: string;
+  assignedTo: string;
+  dueDate: string;
+  priority: BulkPriority;
+  taskType?: string;
+  companyName?: string;
+  brand?: string;
+  rowNumber: number;
+}
+
+interface BulkCreateFailure {
+  index: number;
+  rowNumber: number;
+  title: string;
+  reason: string;
+}
+
+interface BulkCreateResult {
+  created: Task[];
+  failures: BulkCreateFailure[];
+}
+
+interface BulkImportDefaults {
+  assignedTo: string;
+  dueDate: string;
+  priority: BulkPriority;
+  taskType: string;
+  companyName: string;
+  brand: string;
+}
+
+interface BulkTaskDraft {
+  id: string;
+  rowNumber: number;
+  title: string;
+  description: string;
+  assignedTo: string;
+  dueDate: string;
+  priority: BulkPriority | '';
+  taskType: string;
+  companyName: string;
+  brand: string;
+  errors: string[];
 }
 
 interface AdvancedFilters {
@@ -147,6 +200,137 @@ const formatCommentTime = (timestamp: string): string => {
   } catch {
     return 'Recently';
   }
+};
+
+// Bulk Import Helper Functions
+const parseClipboardToDrafts = (pastedText: string, defaults: BulkImportDefaults): BulkTaskDraft[] => {
+  const rows = pastedText.trim().split('\n');
+  const drafts: BulkTaskDraft[] = [];
+
+  rows.forEach((row, index) => {
+    const columns = row.split('\t').map(col => col.trim());
+
+    // Skip empty rows
+    if (columns.length === 0 || columns.every(col => !col.trim())) return;
+
+    const rowNumber = index + 1;
+    const draftId = `draft-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    // Try to parse columns in different formats
+    let title = '';
+    let description = '';
+    let assignedTo = defaults.assignedTo;
+    let dueDate = defaults.dueDate;
+    let priority = defaults.priority as BulkPriority | '';
+    let taskType = defaults.taskType;
+    let companyName = defaults.companyName;
+    let brand = defaults.brand;
+    const errors: string[] = [];
+
+    // Column parsing logic
+    if (columns.length >= 1) title = columns[0];
+    if (columns.length >= 2) description = columns[1];
+    if (columns.length >= 3) {
+      const emailMatch = columns[2].match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+      if (emailMatch) {
+        assignedTo = emailMatch[0];
+      } else {
+        assignedTo = columns[2];
+      }
+    }
+    if (columns.length >= 4) {
+      // Try to parse date
+      const dateStr = columns[3];
+      if (dateStr.match(/\d{4}-\d{2}-\d{2}/)) {
+        dueDate = dateStr;
+      } else if (dateStr.match(/\d{2}\/\d{2}\/\d{4}/)) {
+        // Convert DD/MM/YYYY to YYYY-MM-DD
+        const parts = dateStr.split('/');
+        if (parts.length === 3) {
+          dueDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+        }
+      } else if (dateStr.match(/\d{1,2}-\d{1,2}-\d{4}/)) {
+        // Convert D-M-YYYY to YYYY-MM-DD
+        const parts = dateStr.split('-');
+        if (parts.length === 3) {
+          dueDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+        }
+      }
+    }
+    if (columns.length >= 5) {
+      const priorityStr = columns[4].toLowerCase();
+      if (['urgent', 'high', 'medium', 'low'].includes(priorityStr)) {
+        priority = priorityStr as BulkPriority;
+      } else {
+        priority = '';
+      }
+    }
+    if (columns.length >= 6) taskType = columns[5];
+    if (columns.length >= 7) companyName = columns[6];
+    if (columns.length >= 8) brand = columns[7];
+
+    // Validation
+    if (!title.trim()) {
+      errors.push('Title is required');
+    }
+    if (!assignedTo.trim()) {
+      errors.push('Assignee email is required');
+    } else if (!assignedTo.includes('@')) {
+      errors.push('Invalid email format for assignee');
+    }
+    if (!dueDate) {
+      errors.push('Due date is required');
+    } else {
+      const dueDateObj = new Date(dueDate);
+      if (isNaN(dueDateObj.getTime())) {
+        errors.push('Invalid due date format');
+      }
+    }
+
+    drafts.push({
+      id: draftId,
+      rowNumber,
+      title,
+      description,
+      assignedTo,
+      dueDate,
+      priority,
+      taskType,
+      companyName,
+      brand,
+      errors
+    });
+  });
+
+  return drafts;
+};
+
+const validateBulkDraft = (draft: BulkTaskDraft): BulkTaskDraft => {
+  const errors: string[] = [];
+
+  if (!draft.title.trim()) {
+    errors.push('Title is required');
+  }
+
+  if (!draft.assignedTo.trim()) {
+    errors.push('Assignee email is required');
+  } else if (!draft.assignedTo.includes('@')) {
+    errors.push('Invalid email format for assignee');
+  }
+
+  if (!draft.dueDate) {
+    errors.push('Due date is required');
+  } else {
+    const dueDateObj = new Date(draft.dueDate);
+    if (isNaN(dueDateObj.getTime())) {
+      errors.push('Invalid due date format');
+    }
+  }
+
+  return {
+    ...draft,
+    errors
+  };
 };
 
 // ==================== COMPONENTS ====================
@@ -441,6 +625,365 @@ const TaskFilters = memo(({
 
 TaskFilters.displayName = 'TaskFilters';
 
+// Bulk Importer Component
+const BulkImporter = memo(({
+  draftTasks,
+  defaults,
+  users,
+  onDefaultsChange,
+  onDraftsChange,
+  onClose,
+  onSubmit,
+  submitting,
+  summary
+}: {
+  draftTasks: BulkTaskDraft[];
+  defaults: BulkImportDefaults;
+  users: UserType[];
+  onDefaultsChange: (defaults: Partial<BulkImportDefaults>) => void;
+  onDraftsChange: (drafts: BulkTaskDraft[]) => void;
+  onClose: () => void;
+  onSubmit: () => Promise<void>;
+  submitting: boolean;
+  summary: BulkCreateResult | null;
+}) => {
+  const hasDrafts = draftTasks.length > 0;
+
+  const handleFieldChange = useCallback((id: string, field: keyof BulkTaskDraft, value: string) => {
+    onDraftsChange(draftTasks.map(task =>
+      task.id === id ? { ...task, [field]: value, errors: [] } : task
+    ));
+  }, [draftTasks, onDraftsChange]);
+
+  const handleRemoveDraft = useCallback((id: string) => {
+    onDraftsChange(draftTasks.filter(task => task.id !== id));
+  }, [draftTasks, onDraftsChange]);
+
+  const errorCount = draftTasks.reduce((count, task) => count + task.errors.length, 0);
+
+  const handleValidateDrafts = useCallback(() => {
+    const validatedDrafts = draftTasks.map(draft => validateBulkDraft(draft));
+    onDraftsChange(validatedDrafts);
+  }, [draftTasks, onDraftsChange]);
+
+  useEffect(() => {
+    if (draftTasks.length > 0) {
+      handleValidateDrafts();
+    }
+  }, [draftTasks, handleValidateDrafts]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose}></div>
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">Bulk Task Import</h2>
+            <p className="text-sm text-gray-500">Paste rows from Excel/Sheets below and review before saving.</p>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-full hover:bg-gray-100 text-gray-500">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="px-6 py-4 border-b bg-gray-50">
+          <div className="grid grid-cols-1 lg:grid-cols-6 gap-4">
+            <div className="lg:col-span-2">
+              <label className="block text-xs font-semibold text-gray-700 mb-1 uppercase tracking-wide">Default Assignee</label>
+              <select
+                value={defaults.assignedTo}
+                onChange={(e) => onDefaultsChange({ assignedTo: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Select user</option>
+                {users.map(user => (
+                  <option key={user.id || user.email} value={user.email}>
+                    {user.name} ({user.email})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1 uppercase tracking-wide">Default Due Date</label>
+              <input
+                type="date"
+                value={defaults.dueDate}
+                onChange={(e) => onDefaultsChange({ dueDate: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1 uppercase tracking-wide">Default Priority</label>
+              <select
+                value={defaults.priority}
+                onChange={(e) => onDefaultsChange({ priority: e.target.value as BulkPriority })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1 uppercase tracking-wide">Default Type</label>
+              <input
+                type="text"
+                value={defaults.taskType}
+                onChange={(e) => onDefaultsChange({ taskType: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="regular"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1 uppercase tracking-wide">Default Company</label>
+              <input
+                type="text"
+                value={defaults.companyName}
+                onChange={(e) => onDefaultsChange({ companyName: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="company name"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1 uppercase tracking-wide">Default Brand</label>
+              <input
+                type="text"
+                value={defaults.brand}
+                onChange={(e) => onDefaultsChange({ brand: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder=""
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-auto px-6 py-4 space-y-4">
+          {!hasDrafts ? (
+            <div className="border-2 border-dashed border-gray-200 rounded-lg p-10 text-center bg-white">
+              <FileText className="h-12 w-12 mx-auto text-gray-400 mb-4" />
+              <h3 className="text-lg font-semibold text-gray-800 mb-2">Paste tasks from Excel or Sheets</h3>
+              <p className="text-sm text-gray-500 max-w-2xl mx-auto mb-4">
+                Copy multiple rows (title, description, due date, assignee email, priority etc.) and paste directly here.
+                We will parse columns automatically. You can adjust defaults above for missing values.
+              </p>
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4 text-left text-sm">
+                <p className="font-medium mb-2">Expected format (tab-separated columns):</p>
+                <p className="text-gray-600">Title → Description → Assignee Email → Due Date → Priority → Type → Company → Brand</p>
+                <p className="text-gray-500 text-xs mt-2">Example: Fix login issue → Users can't login → john@example.com → 2024-12-25 → high → bug → ACS → chips</p>
+              </div>
+              <textarea
+                className="mt-4 w-full h-40 border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm font-mono"
+                placeholder="Paste rows here (one task per row)..."
+                onPaste={(e) => {
+                  const pasted = e.clipboardData.getData('text');
+                  e.preventDefault();
+                  const drafts = parseClipboardToDrafts(pasted, defaults);
+                  onDraftsChange(drafts);
+                }}
+              />
+              <p className="text-xs text-gray-400 mt-2">Press Ctrl+V (Cmd+V on Mac) to paste your Excel data</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3 text-sm">
+                  <span className="font-medium text-gray-700">{draftTasks.length} task(s) parsed</span>
+                  {errorCount > 0 && (
+                    <span className="inline-flex items-center gap-1 text-xs text-red-600 bg-red-50 px-2 py-1 rounded-full">
+                      <AlertTriangle className="h-3 w-3" />
+                      {errorCount} validation issue(s)
+                    </span>
+                  )}
+                  {summary && (
+                    <span className="inline-flex items-center gap-2 text-xs text-blue-700 bg-blue-50 px-3 py-1 rounded-full">
+                      <CheckCircle className="h-3 w-3" />
+                      Created {summary.created.length}, {summary.failures.length} failed
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => navigator.clipboard.writeText(draftTasks.map(d => d.title).join('\n'))}
+                    className="px-3 py-1.5 text-xs border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-100"
+                  >
+                    Copy Titles
+                  </button>
+                  <button
+                    onClick={() => onDraftsChange([])}
+                    className="px-3 py-1.5 text-xs border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-100"
+                  >
+                    Clear All
+                  </button>
+                </div>
+              </div>
+
+              <div className="border border-gray-200 rounded-xl overflow-hidden">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr className="text-xs uppercase tracking-wide text-gray-500">
+                      <th className="px-3 py-2">Row</th>
+                      <th className="px-3 py-2 w-48">Title *</th>
+                      <th className="px-3 py-2">Description</th>
+                      <th className="px-3 py-2 w-36">Assigned To *</th>
+                      <th className="px-3 py-2 w-32">Due Date *</th>
+                      <th className="px-3 py-2 w-28">Priority</th>
+                      <th className="px-3 py-2 w-32">Type</th>
+                      <th className="px-3 py-2 w-32">Company</th>
+                      <th className="px-3 py-2 w-32">Brand</th>
+                      <th className="px-3 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-100 text-sm">
+                    {draftTasks.map(draft => (
+                      <tr key={draft.id} className={draft.errors.length ? 'bg-red-50/40' : ''}>
+                        <td className="px-3 py-2 align-top text-xs text-gray-500">#{draft.rowNumber}</td>
+                        <td className="px-3 py-2 align-top">
+                          <input
+                            value={draft.title}
+                            onChange={(e) => handleFieldChange(draft.id, 'title', e.target.value)}
+                            className={`w-full px-2 py-1.5 border ${draft.errors.some(e => e.includes('Title')) ? 'border-red-300' : 'border-gray-200'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm`}
+                            placeholder="Task title"
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <textarea
+                            value={draft.description}
+                            onChange={(e) => handleFieldChange(draft.id, 'description', e.target.value)}
+                            className="w-full min-h-[60px] px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                            placeholder="Optional details"
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <input
+                            value={draft.assignedTo}
+                            onChange={(e) => handleFieldChange(draft.id, 'assignedTo', e.target.value)}
+                            className={`w-full px-2 py-1.5 border ${draft.errors.some(e => e.includes('Assignee') || e.includes('email')) ? 'border-red-300' : 'border-gray-200'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm`}
+                            placeholder="email@example.com"
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <input
+                            type="date"
+                            value={draft.dueDate}
+                            onChange={(e) => handleFieldChange(draft.id, 'dueDate', e.target.value)}
+                            className={`w-full px-2 py-1.5 border ${draft.errors.some(e => e.includes('date')) ? 'border-red-300' : 'border-gray-200'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm`}
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <select
+                            value={draft.priority}
+                            onChange={(e) => handleFieldChange(draft.id, 'priority', e.target.value)}
+                            className="w-full px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                          >
+                            <option value="">Use default</option>
+                            <option value="low">Low</option>
+                            <option value="medium">Medium</option>
+                            <option value="high">High</option>
+                            <option value="urgent">Urgent</option>
+                          </select>
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <input
+                            value={draft.taskType}
+                            onChange={(e) => handleFieldChange(draft.id, 'taskType', e.target.value)}
+                            className="w-full px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                            placeholder="Type"
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <input
+                            value={draft.companyName}
+                            onChange={(e) => handleFieldChange(draft.id, 'companyName', e.target.value)}
+                            className="w-full px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                            placeholder="Company"
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <input
+                            value={draft.brand}
+                            onChange={(e) => handleFieldChange(draft.id, 'brand', e.target.value)}
+                            className="w-full px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                            placeholder="Brand"
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <button
+                            onClick={() => handleRemoveDraft(draft.id)}
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {draftTasks.map(draft => (
+                draft.errors.length > 0 ? (
+                  <div key={`${draft.id}-errors`} className="px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                    <p className="font-medium">Row #{draft.rowNumber} has {draft.errors.length} issue(s):</p>
+                    <ul className="list-disc ml-5 mt-1 space-y-1">
+                      {draft.errors.map((error, idx) => (
+                        <li key={idx}>{error}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null
+              ))}
+
+              {summary && summary.failures.length > 0 && (
+                <div className="px-4 py-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800">
+                  <p className="font-medium">{summary.failures.length} task(s) failed to create:</p>
+                  <ul className="list-disc ml-5 mt-1 space-y-1">
+                    {summary.failures.map(failure => (
+                      <li key={failure.index}>
+                        Row #{failure.rowNumber} - "{failure.title}" &mdash; {failure.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t bg-white flex items-center justify-between">
+          <div className="text-sm text-gray-500">
+            {hasDrafts
+              ? 'Review parsed tasks, fix validation errors, then click "Create tasks".'
+              : 'Paste data from your spreadsheet to get started.'}
+          </div>
+          <div className="flex items-center gap-3">
+            <button onClick={onClose} className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">Cancel</button>
+            <button
+              onClick={onSubmit}
+              disabled={!hasDrafts || submitting || errorCount > 0}
+              className={`px-4 py-2 text-sm font-medium rounded-lg text-white transition-colors ${(!hasDrafts || errorCount > 0)
+                ? 'bg-gray-300 cursor-not-allowed'
+                : submitting
+                  ? 'bg-blue-400'
+                  : 'bg-blue-600 hover:bg-blue-700'
+                }`}
+            >
+              {submitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2 inline" />
+                  Creating...
+                </>
+              ) : `Create ${draftTasks.length} task(s)`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+BulkImporter.displayName = 'BulkImporter';
+
 // Bulk Actions Component
 const BulkActions = memo(({
   selectedTasks,
@@ -605,13 +1148,11 @@ const MobileTaskItem = memo(({
               className="p-1 hover:bg-gray-100 rounded"
               title="Task Actions"
             >
-              {/* MoreHorizontal के बजाय Eye icon */}
-              <Eye className="h-5 w-5 text-gray-500" />
+              <MoreHorizontal className="h-5 w-5 text-gray-500" />
             </button>
 
             {openMenuId === task.id && (
               <div className="absolute right-0 mt-1 w-48 bg-white rounded-lg shadow-lg border z-10">
-                {/* View Details Option - इसी eye icon के dropdown में */}
                 <button
                   onClick={() => {
                     onOpenCommentSidebar(task);
@@ -788,6 +1329,13 @@ const DesktopTaskItem = memo(({
         {/* Task Info - col-span-4 */}
         <div className="col-span-4">
           <div className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              checked={isSelected}
+              onChange={() => onSelectTask(task.id)}
+              className="h-4 w-4 text-blue-600 rounded border-gray-300 mt-0.5"
+            />
+
             <button
               onClick={() => onToggleStatus(task.id, task)}
               disabled={isToggling}
@@ -881,7 +1429,6 @@ const DesktopTaskItem = memo(({
         {/* Actions - col-span-1 */}
         <div className="col-span-1">
           <div className="flex items-center justify-end gap-2">
-            {/* Edit Button */}
             <button
               onClick={() => onEditTask(task)}
               className="p-1 hover:bg-gray-100 rounded"
@@ -889,34 +1436,18 @@ const DesktopTaskItem = memo(({
             >
               <Edit className="h-4 w-4 text-gray-500" />
             </button>
-
-            {/* Eye Icon - Direct comment sidebar open करने के लिए */}
             <button
               onClick={() => onOpenCommentSidebar(task)}
               className="p-1 hover:bg-gray-100 rounded relative"
               title="View Details & Comments"
             >
-              <Eye className="h-4 w-4 text-gray-500" />
-              {/* Comment count badge */}
+              <MessageSquare className="h-4 w-4 text-gray-500" />
               {commentCount > 0 && (
                 <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">
                   {commentCount}
                 </span>
               )}
             </button>
-
-            {/* Settings icon for other actions */}
-            <div className="relative">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onSetOpenMenuId(openMenuId === task.id ? null : task.id);
-                }}
-                className="p-1 hover:bg-gray-100 rounded"
-                title="More Actions"
-              >
-              </button>
-            </div>
           </div>
         </div>
       </div>
@@ -925,6 +1456,7 @@ const DesktopTaskItem = memo(({
 });
 
 DesktopTaskItem.displayName = 'DesktopTaskItem';
+
 // Comment Sidebar Component
 const CommentSidebar = memo(({
   showCommentSidebar,
@@ -1361,7 +1893,8 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
   onAddTaskHistory,
   onApproveTask,
   onUpdateTaskApproval,
-  onFetchTaskHistory
+  onFetchTaskHistory,
+  onBulkCreateTasks
 }) => {
   // State
   const [sortBy, setSortBy] = useState<'title' | 'dueDate' | 'status' | 'priority' | 'createdAt' | 'updatedAt' | 'assignee'>('dueDate');
@@ -1417,6 +1950,20 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
   const [reassignTask, setReassignTask] = useState<Task | null>(null);
   const [newAssigneeId, setNewAssigneeId] = useState('');
   const [reassignLoading, setReassignLoading] = useState(false);
+
+  // ==================== BULK IMPORT STATE ====================
+  const [showBulkImporter, setShowBulkImporter] = useState(false);
+  const [bulkImportDefaults, setBulkImportDefaults] = useState<BulkImportDefaults>({
+    assignedTo: currentUser.email || '',
+    dueDate: new Date().toISOString().split('T')[0],
+    priority: 'medium',
+    taskType: 'regular',
+    companyName: 'ACS',
+    brand: 'chips'
+  });
+  const [bulkDraftTasks, setBulkDraftTasks] = useState<BulkTaskDraft[]>([]);
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const [bulkCreateSummary, setBulkCreateSummary] = useState<BulkCreateResult | null>(null);
 
   const isAdmin = currentUser?.role === 'admin';
 
@@ -1700,6 +2247,86 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
 
     return items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   }, [taskComments, taskHistory, tasks]);
+
+  // ==================== BULK IMPORT FUNCTIONS ====================
+  const handleOpenBulkImporter = useCallback(() => {
+    setShowBulkImporter(true);
+    setBulkCreateSummary(null);
+    setBulkDraftTasks([]);
+
+    // Set current user as default assignee
+    setBulkImportDefaults(prev => ({
+      ...prev,
+      assignedTo: currentUser.email || ''
+    }));
+  }, [currentUser]);
+
+  const handleBulkDefaultsChange = useCallback((defaults: Partial<BulkImportDefaults>) => {
+    setBulkImportDefaults(prev => ({ ...prev, ...defaults }));
+  }, []);
+
+  const handleBulkDraftsChange = useCallback((drafts: BulkTaskDraft[]) => {
+    setBulkDraftTasks(drafts);
+  }, []);
+
+  const handleBulkImportSubmit = useCallback(async () => {
+    if (!onBulkCreateTasks) {
+      toast.error('Bulk create functionality not available');
+      return;
+    }
+
+    if (bulkDraftTasks.length === 0) {
+      toast.error('No tasks to import');
+      return;
+    }
+
+    // Validate all drafts
+    const validatedDrafts = bulkDraftTasks.map(validateBulkDraft);
+    const hasErrors = validatedDrafts.some(draft => draft.errors.length > 0);
+
+    if (hasErrors) {
+      setBulkDraftTasks(validatedDrafts);
+      toast.error('Please fix validation errors before submitting');
+      return;
+    }
+
+    setBulkSubmitting(true);
+
+    try {
+      const payloads: BulkTaskPayload[] = validatedDrafts.map(draft => ({
+        title: draft.title,
+        description: draft.description || undefined,
+        assignedTo: draft.assignedTo,
+        dueDate: draft.dueDate,
+        priority: (draft.priority || bulkImportDefaults.priority) as BulkPriority,
+        taskType: draft.taskType || bulkImportDefaults.taskType,
+        companyName: draft.companyName || bulkImportDefaults.companyName,
+        brand: draft.brand || bulkImportDefaults.brand,
+        rowNumber: draft.rowNumber
+      }));
+
+      const result = await onBulkCreateTasks(payloads);
+      setBulkCreateSummary(result);
+
+      if (result.failures.length === 0) {
+        toast.success(`Successfully created ${result.created.length} tasks`);
+        setShowBulkImporter(false);
+        setBulkDraftTasks([]);
+      } else {
+        toast.success(`Created ${result.created.length} tasks, ${result.failures.length} failed`);
+        // Keep only failed tasks in drafts for retry
+        const failedDrafts = validatedDrafts.filter(draft =>
+          result.failures.some(failure => failure.rowNumber === draft.rowNumber)
+        );
+        setBulkDraftTasks(failedDrafts);
+      }
+    } catch (error: any) {
+      console.error('Bulk import error:', error);
+      toast.error(`Failed to create tasks: ${error.message || 'Unknown error'}`);
+    } finally {
+      setBulkSubmitting(false);
+    }
+  }, [bulkDraftTasks, bulkImportDefaults, onBulkCreateTasks]);
 
   // ==================== EVENT HANDLERS ====================
   const handleFilterChange = useCallback((filterType: keyof AdvancedFilters, value: string) => {
@@ -2032,7 +2659,13 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
     }
   }, [tasks, addHistoryRecord, currentUser, onDeleteTask]);
 
-  const handleOpenCommentSidebar = useCallback(async (task: Task) => {
+ // In the handleOpenCommentSidebar function:
+const handleOpenCommentSidebar = useCallback(async (task: Task) => {
+    if (!task || !task.id) {
+      toast.error("Invalid task selected");
+      return;
+    }
+    
     setSelectedTask(task);
     setShowCommentSidebar(true);
 
@@ -2061,6 +2694,8 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
     setDeletingCommentId(null);
   }, []);
 
+  // In the handleSaveComment function, replace the problematic code:
+
   const handleSaveComment = useCallback(async () => {
     if (!selectedTask) {
       toast.error("No task selected");
@@ -2069,6 +2704,12 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
 
     if (!newComment.trim()) {
       toast.error("Please enter a comment");
+      return;
+    }
+
+    // FIX: Check if selectedTask.id exists
+    if (!selectedTask.id) {
+      toast.error("Task ID not found");
       return;
     }
 
@@ -2082,10 +2723,17 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
       userRole: currentUser.role
     };
 
-    setTaskComments(prev => ({
-      ...prev,
-      [selectedTask.id]: [...(prev[selectedTask.id] || []), optimisticComment]
-    }));
+    // FIX: Safer way to update taskComments
+    setTaskComments(prev => {
+      const taskId = selectedTask.id;
+      if (!taskId) return prev;
+
+      const currentComments = prev[taskId] || [];
+      return {
+        ...prev,
+        [taskId]: [...currentComments, optimisticComment]
+      };
+    });
 
     const commentToSave = newComment;
     setNewComment('');
@@ -2097,7 +2745,10 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
 
         if (savedComment) {
           setTaskComments(prev => {
-            const currentComments = prev[selectedTask.id] || [];
+            const taskId = selectedTask.id;
+            if (!taskId) return prev;
+
+            const currentComments = prev[taskId] || [];
             const updatedComments = currentComments.map(comment =>
               comment.id === optimisticComment.id ? savedComment : comment
             );
@@ -2108,19 +2759,25 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
 
             return {
               ...prev,
-              [selectedTask.id]: updatedComments
+              [taskId]: updatedComments
             };
           });
 
           toast.success('✅ Comment added successfully!');
         }
       } catch (error: any) {
-        setTaskComments(prev => ({
-          ...prev,
-          [selectedTask.id]: (prev[selectedTask.id] || []).filter(
-            comment => !comment.id.startsWith('optimistic-')
-          )
-        }));
+        setTaskComments(prev => {
+          const taskId = selectedTask.id;
+          if (!taskId) return prev;
+
+          const currentComments = prev[taskId] || [];
+          return {
+            ...prev,
+            [taskId]: currentComments.filter(
+              comment => !comment.id.startsWith('optimistic-')
+            )
+          };
+        });
 
         if (error.message?.includes('Network') || error.message?.includes('fetch')) {
           toast.error('🌐 Network error. Please check your connection.');
@@ -2139,7 +2796,6 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
       setCommentLoading(false);
     }
   }, [selectedTask, newComment, currentUser, onSaveComment]);
-
   const handleDeleteComment = useCallback(async (commentId: string) => {
     if (!selectedTask || !onDeleteComment) {
       return;
@@ -2248,6 +2904,53 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
     }
   }, [reassignTask, newAssigneeId, onReassignTask, users, addHistoryRecord, getEmailByIdInternal, currentUser, handleCloseReassignModal]);
 
+  // ==================== BULK CREATE FUNCTION ====================
+  const handleBulkCreateTasks = useCallback(async (tasks: BulkTaskPayload[]): Promise<BulkCreateResult> => {
+    // This is a mock implementation. You should replace this with your actual API call
+    const created: Task[] = [];
+    const failures: BulkCreateFailure[] = [];
+
+    for (const [index, taskData] of tasks.entries()) {
+      try {
+        // Mock task creation - Replace with actual API call
+        const newTask: Task = {
+          id: `task-${Date.now()}-${index}`,
+          title: taskData.title,
+          description: taskData.description || '',
+          assignedTo: taskData.assignedTo,
+          dueDate: taskData.dueDate,
+          priority: taskData.priority,
+          taskType: taskData.taskType || 'regular',
+          companyName: taskData.companyName || 'ACS',
+          brand: taskData.brand || 'chips',
+          status: 'pending',
+          assignedBy: currentUser.email,
+          assignedToUser: users.find(u => u.email === taskData.assignedTo) || {
+            id: 'unknown',
+            name: taskData.assignedTo.split('@')[0],
+            email: taskData.assignedTo,
+            role: 'user'
+          },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          completedApproval: false
+        };
+
+        created.push(newTask);
+        toast.success(`Task "${taskData.title}" created successfully`);
+      } catch (error: any) {
+        failures.push({
+          index,
+          rowNumber: taskData.rowNumber,
+          title: taskData.title,
+          reason: error.message || 'Unknown error'
+        });
+      }
+    }
+
+    return { created, failures };
+  }, [currentUser, users]);
+
   // ==================== FILTERED TASKS ====================
   const filteredTasks = useMemo(() => {
     const tasksWithDemoData = tasks.map(task => getTaskWithDemoData(task));
@@ -2255,14 +2958,29 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
     let filtered = tasksWithDemoData.filter(task => {
       const isCompleted = isTaskCompleted(task.id);
 
-      // 🔥 CRITICAL FIX: BY DEFAULT, ONLY SHOW LOGGED-IN USER'S TASKS
-      // If no specific assigned filter is set, default to "assigned-to-me"
-      const shouldShowMyTasks =
-        (assignedFilter === 'all' || assignedFilter === 'assigned-to-me') &&
-        advancedFilters.assigned === 'all';
+      // 🔥 CRITICAL FIX: BY DEFAULT, SHOW BOTH TASKS ASSIGNED TO YOU AND BY YOU
+      // If no specific assigned filter is set, default to showing both
+      const shouldShowMyTasks = assignedFilter === 'all' || assignedFilter === '';
 
-      if (shouldShowMyTasks && !isTaskAssignee(task)) {
+      if (shouldShowMyTasks) {
+        // Show tasks assigned to me OR assigned by me
+        if (!isTaskAssignee(task) && !isTaskAssigner(task)) {
+          return false;
+        }
+      }
+
+      // Apply specific assigned filters
+      if (assignedFilter === 'assigned-to-me' && !isTaskAssignee(task)) {
         return false;
+      }
+      if (assignedFilter === 'assigned-by-me' && !isTaskAssigner(task)) {
+        return false;
+      }
+
+      // Apply advanced filters for assigned
+      if (advancedFilters.assigned !== 'all') {
+        if (advancedFilters.assigned === 'assigned-to-me' && !isTaskAssignee(task)) return false;
+        if (advancedFilters.assigned === 'assigned-by-me' && !isTaskAssigner(task)) return false;
       }
 
       // Status Filter
@@ -2304,13 +3022,6 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
         const filterBrand = advancedFilters.brand.toLowerCase();
         const taskBrand = task.brand?.toLowerCase() || '';
         if (taskBrand !== filterBrand) return false;
-      }
-
-      // Assigned Filter - SPECIFIC LOGIC
-      if (advancedFilters.assigned !== 'all') {
-        const assignedFilterValue = advancedFilters.assigned;
-        if (assignedFilterValue === 'assigned-to-me' && !isTaskAssignee(task)) return false;
-        if (assignedFilterValue === 'assigned-by-me' && !isTaskAssigner(task)) return false;
       }
 
       // Date Filter
@@ -2399,7 +3110,7 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
     tasks,
     filter,
     dateFilter,
-    assignedFilter, // 🔥 Add assignedFilter to dependencies
+    assignedFilter,
     searchTerm,
     sortBy,
     sortOrder,
@@ -2421,16 +3132,16 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">
-                {advancedFilters.assigned === 'assigned-by-me'
+                {assignedFilter === 'assigned-by-me'
                   ? 'Tasks Assigned By Me'
-                  : advancedFilters.assigned === 'assigned-to-me' || assignedFilter === 'assigned-to-me'
+                  : assignedFilter === 'assigned-to-me'
                     ? 'My Tasks'
                     : 'All Tasks'}
               </h1>
               <p className="text-gray-600 mt-1">
-                {advancedFilters.assigned === 'assigned-by-me'
+                {assignedFilter === 'assigned-by-me'
                   ? 'Tasks you have assigned to others'
-                  : advancedFilters.assigned === 'assigned-to-me' || assignedFilter === 'assigned-to-me'
+                  : assignedFilter === 'assigned-to-me'
                     ? 'Tasks assigned to you'
                     : 'Manage and track all tasks in one place'}
               </p>
@@ -2443,6 +3154,14 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
               >
                 <Filter className="h-4 w-4 mr-2" />
                 {showAdvancedFilters ? 'Hide Filters' : 'Show Filters'}
+              </button>
+
+              <button
+                onClick={handleOpenBulkImporter}
+                className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-lg bg-white text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                <Upload className="h-4 w-4 mr-2" />
+                Bulk Import
               </button>
 
               <button
@@ -2488,13 +3207,22 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
                 ? 'Try changing your filters or search term'
                 : 'Create your first task to get started'}
             </p>
-            <button
-              onClick={onCreateTask}
-              className="inline-flex items-center px-4 py-2 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Create New Task
-            </button>
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              <button
+                onClick={handleOpenBulkImporter}
+                className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-lg bg-white text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                <Upload className="h-4 w-4 mr-2" />
+                Bulk Import Tasks
+              </button>
+              <button
+                onClick={onCreateTask}
+                className="inline-flex items-center px-4 py-2 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Create New Task
+              </button>
+            </div>
           </div>
         ) : (
           <div className="space-y-4">
@@ -2596,6 +3324,21 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
           </div>
         )}
       </div>
+
+      {/* Bulk Import Modal */}
+      {showBulkImporter && (
+        <BulkImporter
+          draftTasks={bulkDraftTasks}
+          defaults={bulkImportDefaults}
+          users={users}
+          onDefaultsChange={handleBulkDefaultsChange}
+          onDraftsChange={handleBulkDraftsChange}
+          onClose={() => setShowBulkImporter(false)}
+          onSubmit={handleBulkImportSubmit}
+          submitting={bulkSubmitting}
+          summary={bulkCreateSummary}
+        />
+      )}
 
       {/* Modals and Sidebars */}
       <CommentSidebar

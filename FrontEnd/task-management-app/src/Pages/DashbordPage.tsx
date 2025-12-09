@@ -271,7 +271,6 @@ const DashboardPage = () => {
     }, [newTask.companyName, companyBrands]);
 
     // ✅ FIXED: Handle Save Comment with proper error handling
-    // DashboardPage.tsx में handleSaveComment को ये replace करें:
     const handleSaveComment = useCallback(async (taskId: string, comment: string): Promise<CommentType | null> => {
         try {
             console.log('🚀 Saving comment via taskService.addComment...');
@@ -598,13 +597,16 @@ const DashboardPage = () => {
     const getFilteredTasksByStat = useCallback(() => {
         if (!currentUser?.email) return [];
 
-        // 🔥 CRITICAL FIX: BY DEFAULT, ONLY SHOW LOGGED-IN USER'S TASKS
+        // 🔥 CRITICAL FIX: SHOW TASKS BASED ON USER ROLE AND ASSIGNMENT
         let filtered = tasks.filter((task) => {
             // Admin sees all tasks
             if (currentUser.role === 'admin') return true;
 
-            // Regular users see only tasks assigned to them
-            return task.assignedTo === currentUser.email;
+            // Regular users see:
+            // 1. Tasks assigned to them (दूसरों द्वारा assign किए गए tasks)
+            // 2. Tasks they assigned to others (अगर वे खुद assigner हैं)
+            return task.assignedTo === currentUser.email || 
+                   task.assignedBy === currentUser.email;
         });
 
         // Apply selected stat filter
@@ -707,14 +709,20 @@ const DashboardPage = () => {
     );
 
     const stats: StatMeta[] = useMemo(() => {
-        const completedTasks = tasks.filter((t) => t.status === 'completed');
-        const pendingTasks = tasks.filter((t) => t.status !== 'completed');
-        const overdueTasks = tasks.filter((t) => isOverdue(t.dueDate, t.status));
+        // Calculate stats based on filtered tasks for current user
+        const userTasks = tasks.filter(task => {
+            if (currentUser.role === 'admin') return true;
+            return task.assignedTo === currentUser.email || task.assignedBy === currentUser.email;
+        });
+        
+        const completedTasks = userTasks.filter((t) => t.status === 'completed');
+        const pendingTasks = userTasks.filter((t) => t.status !== 'completed');
+        const overdueTasks = userTasks.filter((t) => isOverdue(t.dueDate, t.status));
 
         return [
             {
                 name: 'Total Tasks',
-                value: tasks.length,
+                value: userTasks.length,
                 change: '+12%',
                 changeType: 'positive',
                 icon: BarChart3,
@@ -753,7 +761,7 @@ const DashboardPage = () => {
                 bgColor: 'bg-rose-50',
             }
         ];
-    }, [isOverdue, tasks]);
+    }, [isOverdue, tasks, currentUser]);
 
     // Utility functions for styling
     const getPriorityColor = useCallback((priority: TaskPriority) => {

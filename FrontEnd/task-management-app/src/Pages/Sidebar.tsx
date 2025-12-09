@@ -1,7 +1,7 @@
 // components/Sidebar.tsx
 import React from 'react';
 import { X, LogOut } from 'lucide-react';
-import type { NavigationItem, UserType } from '../Types';
+import type { NavigationItem, UserType } from '../Types/Types';
 
 interface SidebarProps {
   sidebarOpen: boolean;
@@ -97,7 +97,6 @@ const Sidebar: React.FC<SidebarProps> = ({
           <div className="flex-1 flex flex-col pt-5 pb-4 overflow-y-auto">
             <div className="flex items-center flex-shrink-0 px-4">
               <div className="h-8 w-8 bg-blue-600 rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-sm">{currentUser.avatar}</span>
               </div>
               <span className="ml-3 text-xl font-bold text-gray-900">TaskFlow</span>
             </div>
@@ -127,9 +126,6 @@ const Sidebar: React.FC<SidebarProps> = ({
           <div className="flex-shrink-0 flex border-t border-gray-200 p-4">
             <div className="flex items-center w-full">
               <div className="flex-shrink-0">
-                <div className="h-9 w-9 rounded-full bg-blue-600 flex items-center justify-center">
-                  <span className="text-white font-bold text-sm">{currentUser.avatar}</span>
-                </div>
               </div>
               <div className="ml-3 flex-1">
                 <p className="text-sm font-medium text-gray-700">{currentUser.name}</p>
