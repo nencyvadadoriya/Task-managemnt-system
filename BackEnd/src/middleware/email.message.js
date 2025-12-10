@@ -7,6 +7,9 @@ console.log('Email Password:', process.env.USER_PASS_KEY ? '✅ Set' : '❌ Miss
 
 // Create transporter with correct environment variables
 const transporter = nodemailer.createTransport({
+    host: "smtp.gmail.com",
+    port: 465,       // SSL ke liye 465, TLS ke liye 587
+    secure: true,
     service: 'gmail',
     auth: {
         user: process.env.USER_EMAIL,  // Changed from EMAIL_USER
@@ -18,7 +21,7 @@ const transporter = nodemailer.createTransport({
 });
 
 // Test email configuration
-transporter.verify(function(error, success) {
+transporter.verify(function (error, success) {
     if (error) {
         console.error('❌ Email configuration error:', error);
     } else {
@@ -77,7 +80,7 @@ exports.sendOtpEmail = async (email, otp, name = 'User') => {
         console.log('✅ Email sent successfully!');
         console.log('📧 Message ID:', info.messageId);
         console.log('📨 Preview URL:', nodemailer.getTestMessageUrl(info));
-        
+
         return true;
     } catch (error) {
         console.error('❌ Email sending failed:', error.message);

@@ -3,7 +3,7 @@ import type { LoginBody, OtpverifyPayload, RegisterUserBody } from "../Types/Typ
 import toast from "react-hot-toast";
 
 class AuthServices {
-    authBaseUrl = "https://task-management-backend-dr1x.onrender.com/api/";
+    authBaseUrl = "https://task-managemnt-backend-app.onrender.com/api/";
     authLoginUrl = "auth/login";
     authRegigsterUrl = "auth/register";
     authForgetPassword = "auth/forgetPassword";
