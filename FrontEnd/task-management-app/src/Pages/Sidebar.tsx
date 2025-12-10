@@ -18,6 +18,20 @@ const Sidebar: React.FC<SidebarProps> = ({
   currentUser,
   handleLogout
 }) => {
+  const getDisplayInitial = () => {
+    if (!currentUser) return 'U';
+
+    if (currentUser.name && currentUser.name.trim() !== '') {
+      return currentUser.name.charAt(0).toUpperCase();
+    }
+
+    if (currentUser.email && currentUser.email.trim() !== '') {
+      return currentUser.email.charAt(0).toUpperCase();
+    }
+
+    return 'U';
+  };
+
   return (
     <>
       {/* Mobile Sidebar */}
@@ -37,7 +51,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <div className="flex-1 h-0 pt-5 pb-4 overflow-y-auto">
             <div className="flex-shrink-0 flex items-center px-4">
               <div className="h-8 w-8 bg-blue-600 rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-sm">{currentUser.avatar}</span>
+                <span className="text-white font-bold text-sm">{getDisplayInitial()}</span>
               </div>
               <span className="ml-3 text-xl font-bold text-gray-900">TaskFlow</span>
             </div>
@@ -72,7 +86,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             <div className="flex items-center w-full">
               <div className="flex-shrink-0">
                 <div className="h-10 w-10 rounded-full bg-blue-600 flex items-center justify-center">
-                  <span className="text-white font-bold text-sm">{currentUser.avatar}</span>
+                  <span className="text-white font-bold text-sm">{getDisplayInitial()}</span>
                 </div>
               </div>
               <div className="ml-3 flex-1">

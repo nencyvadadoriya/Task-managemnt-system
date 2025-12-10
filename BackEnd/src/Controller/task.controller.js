@@ -95,13 +95,11 @@ exports.addTask = async (req, res) => {
                 id: assignedToUser._id,
                 name: assignedToUser.name,
                 email: assignedToUser.email,
-                avatar: assignedToUser.avatar
             } : { email: assignedTo },
             assignedByUser: assignedByUser ? {
                 id: assignedByUser._id,
                 name: assignedByUser.name,
                 email: assignedByUser.email,
-                avatar: assignedByUser.avatar
             } : { email: assignedBy }
         };
 

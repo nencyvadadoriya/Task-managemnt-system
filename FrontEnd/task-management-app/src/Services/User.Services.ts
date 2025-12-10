@@ -128,7 +128,6 @@ class AuthServices {
                 name: userData.name || 'User',
                 role: userData.role || 'user',
                 email: userData.email || '',
-                avatar: userData.avatar || userData.name?.charAt(0) || 'U',
                 phone: userData.phone || '',
                 department: userData.department || '',
                 location: userData.location || '',

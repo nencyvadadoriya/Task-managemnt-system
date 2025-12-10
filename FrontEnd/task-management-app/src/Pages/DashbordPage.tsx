@@ -99,7 +99,6 @@ const DashboardPage = () => {
         name: 'Loading...',
         role: 'user',
         email: '',
-        avatar: 'U',
     });
 
     const [newTask, setNewTask] = useState<NewTaskForm>({
@@ -605,8 +604,8 @@ const DashboardPage = () => {
             // Regular users see:
             // 1. Tasks assigned to them (दूसरों द्वारा assign किए गए tasks)
             // 2. Tasks they assigned to others (अगर वे खुद assigner हैं)
-            return task.assignedTo === currentUser.email || 
-                   task.assignedBy === currentUser.email;
+            return task.assignedTo === currentUser.email ||
+                task.assignedBy === currentUser.email;
         });
 
         // Apply selected stat filter
@@ -714,7 +713,7 @@ const DashboardPage = () => {
             if (currentUser.role === 'admin') return true;
             return task.assignedTo === currentUser.email || task.assignedBy === currentUser.email;
         });
-        
+
         const completedTasks = userTasks.filter((t) => t.status === 'completed');
         const pendingTasks = userTasks.filter((t) => t.status !== 'completed');
         const overdueTasks = userTasks.filter((t) => isOverdue(t.dueDate, t.status));

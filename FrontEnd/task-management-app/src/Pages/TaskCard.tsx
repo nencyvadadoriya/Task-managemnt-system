@@ -46,7 +46,6 @@ const TaskCard: React.FC<TaskCardProps> = ({
         name: 'User',
         email: 'unknown@example.com',
         role: 'user',
-        avatar: 'U'
     };
 
     const assignedUser = task.assignedToUser || getUserById(task.assignedTo);

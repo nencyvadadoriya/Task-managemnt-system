@@ -159,11 +159,7 @@ export default function AuthPage() {
             id: apiUser.id || apiUser._id || 'user-' + Date.now(),
             name: userName,
             email: apiUser.email || apiUser.userEmail || trimmedPayload.email,
-            role: apiUser.role || apiUser.userType || 'employee',
-            avatar: apiUser.avatar ||
-              apiUser.profilePicture ||
-              apiUser.profile_image ||
-              userName.charAt(0).toUpperCase()
+            role: apiUser.role || apiUser.userType || 'employee'
           };
 
           console.log("💾 Saving user data:", userData);
@@ -255,13 +251,9 @@ export default function AuthPage() {
       <div className="bg-white w-full max-w-2xl rounded-md shadow-xl overflow-hidden border border-gray-200">
         {/* Banner */}
         <div
-          className="w-full h-40 bg-cover bg-center"
-          style={{
-            backgroundImage:
-              "url('https://images.pexels.com/photos/1181675/pexels-photo-1181675.jpeg')",
-          }}
+          className="w-full h-40 bg-gradient-to-r from-blue-600 via-indigo-600 to-sky-500 flex justify-center items-center"
         >
-          <div className="w-full h-full bg-black/40 flex justify-center items-center">
+          <div className="w-full h-full bg-black/20 flex justify-center items-center">
             <h1 className="text-white text-2xl font-bold tracking-wide text-center px-4">
               EMPLOYEE TASK MANAGEMENT SYSTEM
             </h1>

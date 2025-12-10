@@ -65,7 +65,6 @@ const TeamPage: React.FC<TeamPageProps> = ({
         name: user?.name || 'Unknown User',
         email: user?.email || 'unknown@example.com',
         role: user?.role || 'user',
-        avatar: user?.avatar || (user?.name ? user.name.charAt(0).toUpperCase() : 'U'),
         phone: user?.phone || 'Not provided'
     });
 
@@ -223,24 +222,16 @@ const TeamPage: React.FC<TeamPageProps> = ({
         return name.charAt(0).toUpperCase();
     };
 
-    // ✅ FIXED: Get user avatar
+    // ✅ FIXED: Get user avatar (initials only, no image)
     const getUserAvatar = (user: UserType): JSX.Element => {
         const safeUser = getSafeUser(user);
         const initials = getUserInitials(safeUser.name);
         
         return (
             <div className="flex-shrink-0">
-                {user.avatar ? (
-                    <img
-                        src={user.avatar}
-                        alt={safeUser.name}
-                        className="h-12 w-12 rounded-full object-cover border-2 border-white shadow"
-                    />
-                ) : (
-                    <div className="h-12 w-12 rounded-full bg-gradient-to-r from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg shadow">
-                        {initials}
-                    </div>
-                )}
+                <div className="h-12 w-12 rounded-full bg-gradient-to-r from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg shadow">
+                    {initials}
+                </div>
             </div>
         );
     };
