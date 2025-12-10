@@ -1,42 +1,18 @@
-const nodemailer = require('nodemailer');
-require('dotenv').config(); // Add this line
+const { Resend } = require('resend');
+require('dotenv').config();
 
 console.log('🔧 Email Configuration:');
-console.log('Email User:', process.env.USER_EMAIL);
-console.log('Email Password:', process.env.USER_PASS_KEY ? '✅ Set' : '❌ Missing');
+console.log('Using Resend');
 
-// Create transporter with correct environment variables
-const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
-    service: 'gmail',
-    auth: {
-        user: process.env.USER_EMAIL,  // Changed from EMAIL_USER
-        pass: process.env.USER_PASS_KEY  // Changed from EMAIL_PASSWORD
-    },
-    tls: {
-        rejectUnauthorized: false
-    }
-});
-
-// Test email configuration
-transporter.verify(function(error, success) {
-    if (error) {
-        console.error('❌ Email configuration error:', error);
-    } else {
-        console.log('✅ Email server is ready to send messages');
-    }
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Send OTP Email
 exports.sendOtpEmail = async (email, otp, name = 'User') => {
     try {
         console.log(`📤 Attempting to send OTP to: ${email}`);
-        console.log(`📧 Using sender: ${process.env.USER_EMAIL}`);
 
-        const mailOptions = {
-            from: `"Your App" <${process.env.USER_EMAIL}>`,
+        const { data, error } = await resend.emails.send({
+            from: 'Your App <onboarding@resend.dev>',
             to: email,
             subject: 'Password Reset OTP',
             html: `
@@ -74,17 +50,17 @@ exports.sendOtpEmail = async (email, otp, name = 'User') => {
                 </body>
                 </html>
             `
-        };
+        });
 
-        const info = await transporter.sendMail(mailOptions);
-        console.log('✅ Email sent successfully!');
-        console.log('📧 Message ID:', info.messageId);
-        console.log('📨 Preview URL:', nodemailer.getTestMessageUrl(info));
-        
+        if (error) {
+            console.error('❌ Resend error:', error);
+            return false;
+        }
+
+        console.log('✅ Email sent via Resend:', data.id);
         return true;
     } catch (error) {
         console.error('❌ Email sending failed:', error.message);
-        console.error('Full error:', error);
         return false;
     }
 };
