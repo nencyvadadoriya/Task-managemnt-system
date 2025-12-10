@@ -95,7 +95,6 @@ export interface UserType {
     _id?: string;
     role: string;
     email: string;
-    avatar?: string;
     phone?: string;
     department?: string;
     location?: string;
