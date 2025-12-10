@@ -102,9 +102,6 @@ exports.loginUser = async (req, res) => {
             process.env.JWT_SECRET || 'secret',
             { expiresIn: '24h' }
         );
-
-        console.log("✅ Login successful for:", email);
-
         // Remove password from response
         user.password = undefined;
 
@@ -353,11 +350,9 @@ exports.getAllUsers = async (req, res) => {
 exports.currentUser = async (req, res) => {
     try {
         const token = req.header('Authorization')?.replace('Bearer ', '');
-        console.log("🔐 Full token:", token);
 
         if (token) {
             const decoded = jwt.decode(token);
-            console.log("🔓 Decoded token:", decoded);
         }
         const userId = req.user.id; 
         if (!userId) {
