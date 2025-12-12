@@ -303,15 +303,6 @@ const DashboardPage = () => {
         [users],
     );
 
-    const getEmailById = useCallback(
-        (userId: string): string => {
-            if (!userId) return '';
-            if (userId.includes('@')) return userId;
-            const user = users.find((u) => u.id === userId || u._id === userId);
-            return user?.email || 'Unknown';
-        }, [users],
-    );
-
     // ✅ ADD THIS FUNCTION - Get available brands
     const getAvailableBrands = useCallback(() => {
         const company = newTask.companyName;
@@ -325,11 +316,10 @@ const DashboardPage = () => {
     }, [editFormData.companyName, companyBrands]);
 
     // ✅ FIXED: Handle Save Comment with proper error handling
-    const handleSaveComment = useCallback(async (taskId: string, comment: string): Promise<CommentType | null> => {
+    const handleSaveComment = useCallback(async (taskId: string, comment: string): Promise<CommentType> => {
         try {
             console.log('🚀 Saving comment via taskService.addComment...');
 
-            // Call taskService.addComment (सिर्फ content pass करें)
             const response = await taskService.addComment(taskId, comment);
 
             console.log('📥 API Response:', response);
@@ -337,7 +327,6 @@ const DashboardPage = () => {
             if (response.success && response.data) {
                 const commentData = response.data;
 
-                // Format comment data
                 const formattedComment: CommentType = {
                     id: commentData.id || commentData._id || `comment-${Date.now()}`,
                     taskId: commentData.taskId || taskId,
@@ -347,19 +336,19 @@ const DashboardPage = () => {
                     userRole: commentData.userRole || currentUser.role,
                     content: commentData.content || comment,
                     createdAt: commentData.createdAt || new Date().toISOString(),
-                    updatedAt: commentData.updatedAt || commentData.createdAt || new Date().toISOString()
+                    updatedAt: commentData.updatedAt || commentData.createdAt || new Date().toISOString(),
                 };
 
                 toast.success('✅ Comment saved successfully!');
                 return formattedComment;
             } else {
                 toast.error(response.message || 'Failed to save comment');
-                return null;
+                throw new Error(response.message || 'Failed to save comment');
             }
         } catch (error: any) {
             console.error('❌ Error saving comment:', error);
 
-            // Fallback mock comment
+            // Fallback mock comment so caller still gets a CommentType
             const mockComment: CommentType = {
                 id: `mock-${Date.now()}`,
                 taskId: taskId,
@@ -369,7 +358,7 @@ const DashboardPage = () => {
                 userRole: currentUser.role,
                 content: comment,
                 createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString()
+                updatedAt: new Date().toISOString(),
             };
 
             toast.success('💾 Comment saved locally (offline mode)');
@@ -1026,18 +1015,31 @@ const DashboardPage = () => {
         fetchUsers();
     }, [fetchCurrentUser, fetchTasks, fetchUsers]);
 
+    const getAssignedToValue = (assignedTo: any): string => {
+        if (!assignedTo) return '';
+
+        // If it's already a string
+        if (typeof assignedTo === 'string') return assignedTo;
+
+        // If it's an object with email property
+        if (typeof assignedTo === 'object' && assignedTo !== null) {
+            return assignedTo.email || assignedTo.name || '';
+        }
+
+        return '';
+    };
     // ✅ ADD THIS: Function to open edit modal with task data
     const handleOpenEditModal = useCallback((task: Task) => {
         setEditingTask(task);
-        
+
         // Format date for input field (YYYY-MM-DD)
         const dueDate = task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : '';
-        
+
         setEditFormData({
             id: task.id,
             title: task.title || '',
             description: task.description || '',
-            assignedTo: task.assignedTo || '',
+            assignedTo: getAssignedToValue(task.assignedTo),
             dueDate: dueDate,
             priority: task.priority || 'medium',
             taskType: task.taskType || 'regular',
@@ -1045,7 +1047,7 @@ const DashboardPage = () => {
             brand: task.brand || '',
             status: task.status || 'pending'
         });
-        
+
         setEditFormErrors({});
         setShowEditTaskModal(true);
         setOpenMenuId(null); // Close any open menus
@@ -1095,6 +1097,63 @@ const DashboardPage = () => {
             setIsCreatingTask(false);
         }
     }, [newTask, currentUser, users, validateForm]);
+    // Add this function before handleSaveEditedTask
+    const trackFieldChange = useCallback((originalTask: Task, updatedData: any): string[] => {
+        const changes: string[] = [];
+
+        // Get the assignedTo value from original task
+        const getOriginalAssignedTo = (task: Task): string => {
+            if (!task.assignedTo) return '';
+            if (typeof task.assignedTo === 'string') return task.assignedTo;
+            if (typeof task.assignedTo === 'object' && task.assignedTo !== null) {
+                return (task.assignedTo as any).email || (task.assignedTo as any).name || '';
+            }
+            return '';
+        };
+
+        const originalAssignedTo = getOriginalAssignedTo(originalTask);
+        const updatedAssignedTo = updatedData.assignedTo || '';
+
+        if (updatedData.title !== undefined && updatedData.title !== originalTask.title) {
+            changes.push(`Title changed from "${originalTask.title}" to "${updatedData.title}"`);
+        }
+
+        if (updatedData.description !== undefined && updatedData.description !== originalTask.description) {
+            changes.push('Description updated');
+        }
+
+        if (updatedAssignedTo && originalAssignedTo !== updatedAssignedTo) {
+            changes.push(`Assignee changed from ${originalAssignedTo} to ${updatedAssignedTo}`);
+        }
+
+        if (updatedData.dueDate !== undefined && updatedData.dueDate !== originalTask.dueDate) {
+            const oldDate = new Date(originalTask.dueDate).toLocaleDateString();
+            const newDate = new Date(updatedData.dueDate).toLocaleDateString();
+            changes.push(`Due date changed from ${oldDate} to ${newDate}`);
+        }
+
+        if (updatedData.priority !== undefined && updatedData.priority !== originalTask.priority) {
+            changes.push(`Priority changed from ${originalTask.priority} to ${updatedData.priority}`);
+        }
+
+        if (updatedData.taskType !== undefined && updatedData.taskType !== originalTask.taskType) {
+            changes.push(`Task type changed from ${originalTask.taskType} to ${updatedData.taskType}`);
+        }
+
+        if (updatedData.companyName !== undefined && updatedData.companyName !== originalTask.companyName) {
+            changes.push(`Company changed from ${originalTask.companyName} to ${updatedData.companyName}`);
+        }
+
+        if (updatedData.brand !== undefined && updatedData.brand !== originalTask.brand) {
+            changes.push(`Brand changed from ${originalTask.brand} to ${updatedData.brand}`);
+        }
+
+        if (updatedData.status !== undefined && updatedData.status !== originalTask.status) {
+            changes.push(`Status changed from ${originalTask.status} to ${updatedData.status}`);
+        }
+
+        return changes;
+    }, []);
 
     // ✅ ADD THIS: Function to save edited task
     const handleSaveEditedTask = useCallback(async () => {
@@ -1117,13 +1176,49 @@ const DashboardPage = () => {
                 assignedToUser: users.find(u => u.email === editFormData.assignedTo),
             };
 
+            // ✅ FIXED: Track changes with proper typing
+            const changes = trackFieldChange(editingTask, updateData);
+
             const response = await taskService.updateTask(editingTask.id, updateData);
             if (response.success && response.data) {
                 // Update local state
                 setTasks(prev => prev.map(task =>
                     task.id === editingTask.id ? response.data as Task : task
                 ));
-                
+
+                // ✅ FIXED: Add history with safe user data
+                if (changes && changes.length > 0) {
+                    const changeDescription = changes.join(', ');
+
+                    // Safe currentUser
+                    const safeUser = currentUser || {
+                        id: 'guest-user',
+                        name: 'Guest User',
+                        email: 'guest@example.com',
+                        role: 'user',
+                    };
+
+                    try {
+                        if (handleAddTaskHistory) {
+                            await handleAddTaskHistory(
+                                editingTask.id,
+                                {
+                                    taskId: editingTask.id,
+                                    action: 'task_edited',
+                                    description: `Task edited by ${safeUser.role} (${safeUser.name}): ${changeDescription}`,
+                                    userId: safeUser.id,
+                                    userName: safeUser.name,
+                                    userEmail: safeUser.email,
+                                    userRole: safeUser.role,
+                                }
+                            );
+                        }
+                    } catch (error) {
+                        console.error('Error adding edit history:', error);
+                        // Continue even if history fails
+                    }
+                }
+
                 // Close modal and reset
                 setShowEditTaskModal(false);
                 setEditingTask(null);
@@ -1139,20 +1234,8 @@ const DashboardPage = () => {
                     brand: '',
                     status: 'pending'
                 });
-                
+
                 toast.success('Task updated successfully!');
-                
-                // Add history
-                await handleAddTaskHistory(editingTask.id, {
-                    taskId: editingTask.id,
-                    action: 'task_updated',
-                    description: `Task updated by ${currentUser.name}`,
-                    userId: currentUser.id,
-                    userName: currentUser.name,
-                    userEmail: currentUser.email,
-                    userRole: currentUser.role,
-                });
-                
             } else {
                 toast.error(response.message || 'Failed to update task');
             }
@@ -2083,14 +2166,16 @@ const DashboardPage = () => {
                                         return await handleUpdateTask(taskId, updatedTask);
                                     }}
                                     onDeleteTask={handleDeleteTask}
-                                    getEmailById={getEmailById}
                                     formatDate={formatDate}
                                     isOverdue={isOverdue}
                                     getTaskBorderColor={getTaskBorderColor}
                                     openMenuId={openMenuId}
                                     setOpenMenuId={setOpenMenuId}
                                     onToggleTaskStatus={handleToggleTaskStatus}
-                                    onCreateTask={() => setShowAddTaskModal(true)}
+                                    onCreateTask={async () => {
+                                        setShowAddTaskModal(true);
+                                        return undefined;
+                                    }}
                                     onSaveComment={handleSaveComment}
                                     onDeleteComment={handleDeleteComment}
                                     onFetchTaskComments={handleFetchTaskComments}
@@ -2152,6 +2237,7 @@ const DashboardPage = () => {
                                     getAssignedByInfo={getAssignedByInfo}
                                     formatDate={formatDate}
                                     isOverdue={isOverdue}
+                                    currentUser={currentUser}
                                 />
                             ) : null}
                         </div>

@@ -36,6 +36,7 @@ export interface TaskHistory {
   taskId: string;
   action:
     | 'created'
+    | 'task_created'
     | 'reassigned'
     | 'completed'
     | 'pending'

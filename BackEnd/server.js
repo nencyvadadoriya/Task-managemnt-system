@@ -2,18 +2,9 @@ require("dotenv").config();
 const express = require('express');
 require("./src/config/db.confing")
 const app = express();
-
 const PORT = process.env.PORT || 9000;
-const cors = require('cors');
-
-app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    'https://task-managemnt-frontend-app.onrender.com'
-  ],
-  credentials: true,
-}));
-
+const cors = require("cors");
+app.use(cors());
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }));
 

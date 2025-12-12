@@ -25,7 +25,6 @@ import {
   XCircle,
   ChevronDown,
   ChevronUp,
-  Tag,
   Building,
   Layers,
   FileClock,
@@ -33,7 +32,7 @@ import {
 
 import type { Task, UserType, CommentType, TaskHistory } from '../Types/Types';
 import toast from 'react-hot-toast';
-import { useEffect, useMemo, useCallback, useState, memo } from 'react';
+import { useMemo, useCallback, useState, memo } from 'react';
 
 // ==================== TYPES ====================
 interface AllTasksPageProps {
@@ -50,7 +49,6 @@ interface AllTasksPageProps {
   users: UserType[];
   onEditTask: (taskId: string, updatedTask: Partial<Task>) => Promise<Task | null>;
   onDeleteTask: (taskId: string) => Promise<void>;
-  getEmailById?: (userId: any) => string;
   formatDate: (date: string) => string;
   isOverdue: (dueDate: string, status: string) => boolean;
   getTaskBorderColor: (task: Task) => string;
@@ -58,11 +56,11 @@ interface AllTasksPageProps {
   setOpenMenuId: (id: string | null) => void;
   onToggleTaskStatus: (taskId: string, currentStatus: Task['status'], doneByAdmin?: boolean) => Promise<void>;
   onCreateTask: () => Promise<Task | void>;
-  onSaveComment?: (taskId: string, comment: string) => Promise<CommentType | null>;
+  onSaveComment?: (taskId: string, content: string) => Promise<CommentType>;
   onDeleteComment?: (taskId: string, commentId: string) => Promise<void>;
   onFetchTaskComments?: (taskId: string) => Promise<CommentType[]>;
   onReassignTask?: (taskId: string, newAssigneeId: string) => Promise<void>;
-  onAddTaskHistory?: (taskId: string, history: Omit<TaskHistory, 'id' | 'timestamp'>) => Promise<void>;
+  onAddTaskHistory?: (taskId: string, history: Omit<TaskHistory, 'id' | 'timestamp'>, additionalData?: Record<string, any>) => Promise<void>;
   onApproveTask?: (taskId: string, approve: boolean) => Promise<void>;
   onUpdateTaskApproval?: (taskId: string, completedApproval: boolean) => Promise<void>;
   onFetchTaskHistory?: (taskId: string) => Promise<TaskHistory[]>;
@@ -168,14 +166,6 @@ const COMPANY_BRAND_MAP: Record<string, string[]> = {
   'global inc': ['lays', 'pepsi', '7up']
 };
 
-const PRIORITY_ORDER: Record<string, number> = {
-  'urgent': 4,
-  'high': 3,
-  'medium': 2,
-  'low': 1,
-  '': 0
-};
-
 const PRIORITY_OPTIONS = ['low', 'medium', 'high', 'urgent'] as const;
 const TASK_TYPE_OPTIONS = ['regular', 'troubleshoot', 'maintenance', 'development', 'bug', 'feature'] as const;
 const COMPANY_OPTIONS = ['acs', 'md inpex', 'tech solutions', 'global inc', 'other'] as const;
@@ -200,6 +190,22 @@ const HISTORY_ACTION_CONFIG: Record<string, { color: string; icon: React.ReactNo
 };
 
 // ==================== UTILITY FUNCTIONS ====================
+const formatDateTime = (timestamp: string): string => {
+  try {
+    const date = new Date(timestamp);
+    return date.toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+  } catch {
+    return timestamp;
+  }
+};
+
 const getTaskWithDemoData = (task: Task): Task => {
   if (task.company && task.brand && task.type) {
     return {
@@ -222,125 +228,6 @@ const getTaskWithDemoData = (task: Task): Task => {
     brand: (task.brand || brands[hash % brands.length]).toLowerCase(),
     type: (task.type || types[hash % types.length]).toLowerCase(),
   };
-};
-
-const formatDateTime = (timestamp: string): string => {
-  try {
-    const date = new Date(timestamp);
-    return date.toLocaleString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    });
-  } catch {
-    return timestamp;
-  }
-};
-
-// Bulk Import Helper Functions
-const parseClipboardToDrafts = (pastedText: string, defaults: BulkImportDefaults): BulkTaskDraft[] => {
-  const rows = pastedText.trim().split('\n');
-  const drafts: BulkTaskDraft[] = [];
-
-  rows.forEach((row, index) => {
-    const columns = row.split('\t').map(col => col.trim());
-
-    // Skip empty rows
-    if (columns.length === 0 || columns.every(col => !col.trim())) return;
-
-    const rowNumber = index + 1;
-    const draftId = `draft-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-    // Try to parse columns in different formats
-    let title = '';
-    let description = '';
-    let assignedTo = defaults.assignedTo;
-    let dueDate = defaults.dueDate;
-    let priority = defaults.priority as BulkPriority | '';
-    let taskType = defaults.taskType;
-    let companyName = defaults.companyName;
-    let brand = defaults.brand;
-    const errors: string[] = [];
-
-    // Column parsing logic
-    if (columns.length >= 1) title = columns[0];
-    if (columns.length >= 2) description = columns[1];
-    if (columns.length >= 3) {
-      const emailMatch = columns[2].match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
-      if (emailMatch) {
-        assignedTo = emailMatch[0];
-      } else {
-        assignedTo = columns[2];
-      }
-    }
-    if (columns.length >= 4) {
-      // Try to parse date
-      const dateStr = columns[3];
-      if (dateStr.match(/\d{4}-\d{2}-\d{2}/)) {
-        dueDate = dateStr;
-      } else if (dateStr.match(/\d{2}\/\d{2}\/\d{4}/)) {
-        // Convert DD/MM/YYYY to YYYY-MM-DD
-        const parts = dateStr.split('/');
-        if (parts.length === 3) {
-          dueDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
-        }
-      } else if (dateStr.match(/\d{1,2}-\d{1,2}-\d{4}/)) {
-        // Convert D-M-YYYY to YYYY-MM-DD
-        const parts = dateStr.split('-');
-        if (parts.length === 3) {
-          dueDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
-        }
-      }
-    }
-    if (columns.length >= 5) {
-      const priorityStr = columns[4].toLowerCase();
-      if (['urgent', 'high', 'medium', 'low'].includes(priorityStr)) {
-        priority = priorityStr as BulkPriority;
-      } else {
-        priority = '';
-      }
-    }
-    if (columns.length >= 6) taskType = columns[5];
-    if (columns.length >= 7) companyName = columns[6];
-    if (columns.length >= 8) brand = columns[7];
-
-    // Validation
-    if (!title.trim()) {
-      errors.push('Title is required');
-    }
-    if (!assignedTo.trim()) {
-      errors.push('Assignee email is required');
-    } else if (!assignedTo.includes('@')) {
-      errors.push('Invalid email format for assignee');
-    }
-    if (!dueDate) {
-      errors.push('Due date is required');
-    } else {
-      const dueDateObj = new Date(dueDate);
-      if (isNaN(dueDateObj.getTime())) {
-        errors.push('Invalid due date format');
-      }
-    }
-
-    drafts.push({
-      id: draftId,
-      rowNumber,
-      title,
-      description,
-      assignedTo,
-      dueDate,
-      priority,
-      taskType,
-      companyName,
-      brand,
-      errors
-    });
-  });
-
-  return drafts;
 };
 
 const validateBulkDraft = (draft: BulkTaskDraft): BulkTaskDraft => {
@@ -553,13 +440,17 @@ const EditTaskModal = memo(({
                   <option value="">Select brand</option>
                   {availableBrands.map(brand => (
                     <option key={brand} value={brand}>
-                      {brand.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
+                      {brand.split(' ').map(word =>
+                        word.charAt(0).toUpperCase() + word.slice(1)
+                      ).join(' ')}
                     </option>
                   ))}
                   <option value="other">Other</option>
                 </select>
                 {!editFormData.company && (
-                  <p className="text-xs text-gray-500 mt-1">Select a company first</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Select a company first
+                  </p>
                 )}
               </div>
             </div>
@@ -623,7 +514,7 @@ const EditTaskModal = memo(({
 EditTaskModal.displayName = 'EditTaskModal';
 
 // Task Status Badge Component
-const TaskStatusBadge = memo(({ taskId, tasks, currentUser }: {
+const TaskStatusBadge = memo(({ taskId, tasks, }: {
   taskId: string;
   tasks: Task[];
   currentUser: UserType;
@@ -1204,7 +1095,7 @@ Add user notifications
                           <select
                             value={draft.assignedTo}
                             onChange={(e) => handleFieldChange(draft.id, 'assignedTo', e.target.value)}
-                            className={`w-full px-3 py-2 border ${draft.errors.some(e => e.includes('Assignee') || e.includes('email')) ? 'border-red-300' : 'border-gray-200'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white`}
+                            className={`w-full px-3 py-2 border ${draft.errors.some(e => e.includes('Assignee') || e.includes('email')) ? 'border-red-300' : 'border-gray-200'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white`}
                           >
                             <option value="">Select assignee</option>
                             {users.map(user => (
@@ -1304,10 +1195,10 @@ Add user notifications
               onClick={onSubmit}
               disabled={draftTasks.length === 0 || submitting || errorCount > 0}
               className={`px-6 py-2 text-sm font-medium rounded-lg text-white transition-colors flex items-center gap-2 ${draftTasks.length === 0 || errorCount > 0
-                  ? 'bg-gray-300 cursor-not-allowed'
-                  : submitting
-                    ? 'bg-blue-400'
-                    : 'bg-blue-600 hover:bg-blue-700'
+                ? 'bg-gray-300 cursor-not-allowed'
+                : submitting
+                  ? 'bg-blue-400'
+                  : 'bg-blue-600 hover:bg-blue-700'
                 }`}
             >
               {submitting ? (
@@ -1566,7 +1457,7 @@ const MobileTaskItem = memo(({
                       className="w-full px-4 py-2 text-left text-sm text-green-700 hover:bg-green-50 flex items-center gap-2"
                     >
                       <Check className="h-4 w-4" />
-                      {isApproving ? 'Processing...' : 'Approve Completion'}
+                      Approve Completion
                     </button>
                     <button
                       onClick={() => onOpenApprovalModal(task, 'reject')}
@@ -1985,7 +1876,11 @@ const CommentSidebar = memo(({
   getUserInfoForDisplay,
   isTaskCompleted,
   getStatusBadgeColor,
-  getStatusText
+  getStatusText,
+  onDeleteComment,
+  deletingCommentId,
+  loadingComments,
+  loadingHistory
 }: any) => {
   if (!showCommentSidebar || !selectedTask) return null;
 
@@ -2000,7 +1895,7 @@ const CommentSidebar = memo(({
         onClick={onCloseSidebar}
       />
       <div className="absolute inset-y-0 right-0">
-        <div className="h-full bg-white shadow-xl overflow-y-auto w-md transform transition-transform duration-300 ease-in-out">
+        <div className="h-full bg-white shadow-xl overflow-y-auto w-full md:w-[500px] transform transition-transform duration-300 ease-in-out">
           {/* Sidebar Header */}
           <div className="sticky top-0 bg-white border-b z-10">
             <div className="px-4 py-4">
@@ -2078,7 +1973,7 @@ const CommentSidebar = memo(({
                           {formatDate(selectedTask.dueDate)}
                         </div>
                         {isOverdue(selectedTask.dueDate, selectedTask.status) && !isCompleted && (
-                          <div className="text-red-600 text-xs mt-1">Overdue</div>
+                          <div className="text-red-600 text-xs">Overdue</div>
                         )}
                       </div>
                     </div>
@@ -2111,42 +2006,84 @@ const CommentSidebar = memo(({
                     )}
                   </div>
                 </div>
-                {/* Add Comment Section */}
-                <div className="mt-8 pt-6 border-t">
-                  <h4 className="font-medium text-gray-900 mb-3">Add Comment</h4>
-                  <div className="flex gap-2">
-                    <textarea
-                      value={newComment}
-                      onChange={(e) => onSetNewComment(e.target.value)}
-                      placeholder="Type your comment here..."
-                      className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[80px] resize-none"
-                      rows={3}
-                    />
-                  </div>
-                  <div className="flex justify-between items-center mt-3">
-                    <button
-                      onClick={onSaveComment}
-                      disabled={!newComment.trim() || commentLoading}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium flex items-center gap-2 transition-colors"
-                    >
-                      {commentLoading ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          Sending...
-                        </>
-                      ) : (
-                        <>
-                          <Send className="h-4 w-4" />
-                          Add Comment
-                        </>
-                      )}
-                    </button>
-                  </div>
-                  {!onSaveComment && (
-                    <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-700">
-                      ⚠️ Comment saving functionality is not available.
+
+                {/* Comments Section */}
+                <div className="mt-6 pt-6 border-t">
+                  <h4 className="font-medium text-gray-900 mb-3">Comments</h4>
+                  {taskComments && taskComments.length > 0 ? (
+                    <div className="space-y-3 mb-4">
+                      {taskComments.map((comment: CommentType) => (
+                        <div key={comment.id} className="border-l-2 border-blue-400 pl-3 py-2">
+                          <div className="flex justify-between items-start">
+                            <div className="text-xs font-medium text-gray-900">
+                              {comment.userName} ({comment.userRole})
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-gray-500">
+                                {formatDateTime(comment.createdAt)}
+                              </span>
+                              {onDeleteComment && comment.userId === currentUser.id && (
+                                <button
+                                  onClick={() => onDeleteComment(selectedTask.id, comment.id)}
+                                  disabled={deletingCommentId === comment.id}
+                                  className="text-xs text-red-600 hover:text-red-800"
+                                >
+                                  {deletingCommentId === comment.id ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    'Delete'
+                                  )}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <p className="text-sm text-gray-700 mt-1">{comment.content}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-4 text-gray-500 text-sm">
+                      No comments yet
                     </div>
                   )}
+
+                  {/* Add Comment Section */}
+                  <div className="mt-4">
+                    <h4 className="font-medium text-gray-900 mb-3">Add Comment</h4>
+                    <div className="flex gap-2">
+                      <textarea
+                        value={newComment}
+                        onChange={(e) => onSetNewComment(e.target.value)}
+                        placeholder="Type your comment here..."
+                        className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[80px] resize-none"
+                        rows={3}
+                      />
+                    </div>
+                    <div className="flex justify-between items-center mt-3">
+                      <button
+                        onClick={onSaveComment}
+                        disabled={!newComment.trim() || commentLoading}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium flex items-center gap-2 transition-colors"
+                      >
+                        {commentLoading ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Sending...
+                          </>
+                        ) : (
+                          <>
+                            <Send className="h-4 w-4" />
+                            Add Comment
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    {!onSaveComment && (
+                      <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-700">
+                        ⚠️ Comment saving functionality is not available.
+                      </div>
+                    )}
+                  </div>
                 </div>
               </>
             ) : (
@@ -2157,20 +2094,25 @@ const CommentSidebar = memo(({
                     <FileClock className="h-5 w-5 text-blue-600" />
                     <h3 className="font-bold text-gray-900">History</h3>
                     <span className="ml-auto text-xs text-gray-500">
-                      {taskComments.length} records
+                      {taskComments ? taskComments.length : 0} records
                     </span>
                   </div>
                 </div>
 
-                {/* Permanent History Timeline */}
-                {taskComments.length === 0 ? (
+                {/* Loading State */}
+                {(loadingHistory || loadingComments) ? (
+                  <div className="text-center py-8">
+                    <Loader2 className="h-8 w-8 animate-spin mx-auto text-gray-400" />
+                    <p className="mt-2 text-gray-500">Loading history...</p>
+                  </div>
+                ) : taskComments && taskComments.length === 0 ? (
                   <div className="text-center py-8">
                     <FileClock className="h-12 w-12 mx-auto text-gray-300" />
                     <p className="mt-2 text-gray-500">No history available</p>
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {taskComments.map((comment: CommentType) => (
+                    {taskComments?.map((comment: CommentType) => (
                       <div key={comment.id} className="border-l-2 border-blue-400 pl-4 pb-4">
                         <div className="flex items-center gap-2 mb-2">
                           <MessageSquare className="h-4 w-4 text-blue-500" />
@@ -2442,7 +2384,6 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
   users,
   onEditTask,
   onDeleteTask,
-  getEmailById,
   formatDate,
   isOverdue,
   getTaskBorderColor,
@@ -2539,45 +2480,22 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
 
   // ==================== UTILITY FUNCTIONS ====================
   const getEmailByIdInternal = useCallback((userId: any): string => {
-    if (getEmailById) {
-      const email = getEmailById(userId);
-      if (email && email !== 'Unknown') return email;
-    }
-
-    if (typeof userId === 'string' && userId.includes('@')) {
+    if (userId && userId.includes('@')) {
       return userId;
     }
 
-    const searchStr = String(userId || '').trim();
-    if (!searchStr || searchStr === 'undefined' || searchStr === 'null') {
-      return 'Unknown';
-    }
-
-    const user = users.find(u => {
-      if (u.email && u.email.toLowerCase() === searchStr.toLowerCase()) return true;
-      if (u.id && u.id.toString() === searchStr) return true;
-      if (u._id && u._id.toString() === searchStr) return true;
-      if (u.name && u.name.toLowerCase() === searchStr.toLowerCase()) return true;
-      return false;
-    });
+    const user = users.find(u =>
+      u.id === userId ||
+      u._id === userId ||
+      u.email === userId
+    );
 
     if (user) {
       return user.email || user.name || 'Unknown';
     }
 
-    if (typeof userId === 'object' && userId !== null) {
-      const userObj = userId as any;
-      if (userObj.email) return userObj.email;
-      if (userObj.name) return userObj.name;
-    }
-
-    if (typeof userId === 'string') {
-      if (userId.includes('@')) return userId;
-      return 'Unknown';
-    }
-
     return 'Unknown';
-  }, [getEmailById, users]);
+  }, [users]);
 
   const getAssignerEmail = useCallback((task: Task): string => {
     if (!task.assignedBy) return 'Unknown';
@@ -2835,11 +2753,12 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
       userName: currentUser.name,
       userEmail: currentUser.email,
       userRole: currentUser.role,
+      additionalData
     };
 
     try {
       if (onAddTaskHistory) {
-        await onAddTaskHistory(taskId, historyPayload);
+        await onAddTaskHistory(taskId, historyPayload, additionalData);
         // Refresh history after adding new record
         if (onFetchTaskHistory) {
           await fetchAndStoreTaskHistory(taskId);
@@ -3259,14 +3178,6 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
     setShowAdvancedFilters(false);
     toast.success('All filters cleared');
   }, [setFilter, setAssignedFilter, setDateFilter, setSearchTerm]);
-
-  const handleSelectTask = useCallback((taskId: string) => {
-    setSelectedTasks(prev => (
-      prev.includes(taskId)
-        ? prev.filter(id => id !== taskId)
-        : [...prev, taskId]
-    ));
-  }, []);
 
   const handleBulkStatusChange = useCallback(async (status: 'completed' | 'pending') => {
     if (selectedTasks.length === 0) return;
@@ -4123,7 +4034,7 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
         />
       )}
 
-      {/* Modals and Sidebars */}
+      {/* Comment Sidebar */}
       <CommentSidebar
         showCommentSidebar={showCommentSidebar}
         selectedTask={selectedTask}
@@ -4146,6 +4057,7 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
         getStatusText={getStatusText}
       />
 
+      {/* Approval Modal */}
       <ApprovalModal
         showApprovalModal={showApprovalModal}
         taskToApprove={taskToApprove}
@@ -4155,6 +4067,7 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
         onApprove={handleApproveTask}
       />
 
+      {/* Reassign Modal */}
       <ReassignModal
         showReassignModal={showReassignModal}
         reassignTask={reassignTask}
@@ -4166,6 +4079,7 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
         onReassign={handleReassignTask}
       />
 
+      {/* Task History Modal */}
       <TaskHistoryModal
         showHistoryModal={showHistoryModal}
         historyTask={historyTask}

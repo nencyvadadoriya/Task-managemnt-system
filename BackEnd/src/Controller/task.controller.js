@@ -515,7 +515,6 @@ exports.getTaskComments = async (req, res) => {
     }
 };
 
-// Task history APIs
 exports.getTaskHistory = async (req, res) => {
     try {
         const { taskId } = req.params;
@@ -527,7 +526,15 @@ exports.getTaskHistory = async (req, res) => {
             });
         }
 
-        // Do not require the Task document to exist so history survives deletion
+        const taskExists = await Task.exists({ _id: taskId });
+
+        if (!taskExists) {
+            return res.status(404).json({
+                success: false,
+                message: 'Task not found'
+            });
+        }
+
         const historyEntries = await TaskHistory.find({ taskId })
             .sort({ timestamp: -1 })
             .lean();
@@ -551,94 +558,6 @@ exports.getTaskHistory = async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Error fetching task history',
-            error: error.message
-        });
-    }
-};
-
-// Create a generic history entry for a task (used by frontend explicit history calls)
-exports.addTaskHistory = async (req, res) => {
-    try {
-        const { taskId } = req.params;
-
-        if (!mongoose.Types.ObjectId.isValid(taskId)) {
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid task id'
-            });
-        }
-
-        const task = await Task.findById(taskId);
-
-        if (!task) {
-            return res.status(404).json({
-                success: false,
-                message: 'Task not found'
-            });
-        }
-
-        if (!userCanAccessTask(task, req.user)) {
-            return res.status(403).json({
-                success: false,
-                message: 'You are not authorized to record history for this task'
-            });
-        }
-
-        const user = req.user || {};
-        const {
-            action,
-            description,
-            oldStatus,
-            newStatus,
-            note,
-            oldValue,
-            newValue
-        } = req.body || {};
-
-        if (!action || !description) {
-            return res.status(400).json({
-                success: false,
-                message: 'action and description are required for history entry'
-            });
-        }
-
-        const history = await TaskHistory.create({
-            taskId: task._id,
-            action,
-            description,
-            oldStatus: oldStatus || null,
-            newStatus: newStatus || null,
-            note: note || '',
-            oldValue: oldValue || undefined,
-            newValue: newValue || undefined,
-            userId: (user.id || user._id || '').toString(),
-            user: {
-                userId: (user.id || user._id || '').toString(),
-                userName: user.name || 'Unknown User',
-                userEmail: user.email || 'unknown@example.com',
-                userRole: user.role || 'user'
-            }
-        });
-
-        const formatted = {
-            ...history.toObject(),
-            id: history._id,
-            userName: history.user?.userName,
-            userEmail: history.user?.userEmail,
-            userRole: history.user?.userRole,
-            timestamp: history.timestamp
-        };
-
-        res.status(201).json({
-            success: true,
-            message: 'Task history recorded successfully',
-            data: formatted
-        });
-    } catch (error) {
-        console.error('Error adding task history:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error adding task history',
             error: error.message
         });
     }
