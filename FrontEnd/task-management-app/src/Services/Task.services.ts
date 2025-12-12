@@ -18,7 +18,7 @@ const getAuthHeaders = () => {
 };
 
 class TaskService {
-    baseUrl = "http://localhost:9000/api/task/";
+    baseUrl = "https://task-managemnt-backend-app.onrender.com/api/task/";
 
     authAddTask = "addTask";
     authGetAllTask = "getAllTasks";
@@ -309,6 +309,31 @@ class TaskService {
                 success: false,
                 data: [],
                 message: error.response?.data?.msg || 'Failed to fetch history'
+            };
+        }
+    }
+
+    // NEW: Add Task History
+    async addTaskHistory(taskId: string, payload: any) {
+        try {
+            console.log(' Adding history for task:', taskId);
+            const res = await axios.post(
+                this.buildHistoryUrl(taskId),
+                payload,
+                getAuthHeaders()
+            );
+
+            return {
+                success: Boolean(res.data.success),
+                data: res.data.data,
+                message: res.data.message || res.data.msg || 'History added successfully'
+            };
+        } catch (error: any) {
+            console.error(' Error adding history:', error);
+            return {
+                success: false,
+                data: null,
+                message: error.response?.data?.msg || 'Failed to add history'
             };
         }
     }

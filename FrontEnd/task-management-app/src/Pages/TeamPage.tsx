@@ -4,17 +4,12 @@ import {
     Edit,
     Trash2,
     Plus,
-    User,
     Users,
     ChevronDown,
     ChevronUp,
-    CheckCircle,
-    Clock,
-    AlertCircle,
     Filter,
     Shield,
     Mail,
-    MoreVertical,
 } from 'lucide-react';
 
 import type { Task, UserType } from '../Types/Types';
@@ -29,6 +24,7 @@ interface TeamPageProps {
     getAssignedByInfo: (task: Task) => { name: string; email: string };
     formatDate: (dateString: string) => string;
     isOverdue: (dueDate: string, status: string) => boolean;
+    currentUser: UserType;
 }
 
 const TeamPage: React.FC<TeamPageProps> = ({
@@ -37,31 +33,31 @@ const TeamPage: React.FC<TeamPageProps> = ({
     onEditUser,
     onDeleteUser,
     onAddUser,
-    getAssignedByInfo,
-    formatDate,
-    isOverdue
+    isOverdue,
+    currentUser
 }) => {
-
     const [searchTerm, setSearchTerm] = useState('');
-    const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [userToDelete, setUserToDelete] = useState<string | null>(null);
     const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
     const [filterRole, setFilterRole] = useState<string>('all');
-    const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
     const [sortBy, setSortBy] = useState<'name' | 'role' | 'tasks'>('name');
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+    const [showTotalUsers, setShowTotalUsers] = useState(false);
+    const [showAdminsOnly, setShowAdminsOnly] = useState(false);
 
-    // ✅ FIXED: Safe user with fallback values
     const getSafeUser = (user: UserType) => ({
         id: user?.id || 'unknown',
-        name: user?.name || 'Unknown User',
-        email: user?.email || 'unknown@example.com',
+        name: user?.name || 'Unknown',
+        email: user?.email || '',
         role: user?.role || 'user',
-        phone: user?.phone || 'Not provided'
+        phone: user?.phone || ''
     });
 
-    // ✅ FIXED: Get tasks assigned to user
+    const isCurrentUserAdmin = useMemo(() => {
+        return currentUser?.role === 'admin';
+    }, [currentUser]);
+
     const getTasksForUser = useMemo(() => {
         return (userId: string) => {
             return tasks.filter(task => {
@@ -76,30 +72,26 @@ const TeamPage: React.FC<TeamPageProps> = ({
         };
     }, [tasks]);
 
-    // ✅ FIXED: Get tasks created by user
     const getTasksCreatedByUser = useMemo(() => {
         return (userId: string) => {
             return tasks.filter(task => {
-                // assignedBy can be string | UserType
                 if (typeof task.assignedBy === 'string') {
                     return task.assignedBy === userId;
                 }
-
                 if (task.assignedBy && typeof task.assignedBy === 'object' && 'id' in task.assignedBy) {
                     return task.assignedBy.id === userId;
                 }
-
                 return false;
             });
         };
     }, [tasks]);
 
-    // ✅ FIXED: Filter and sort users
     const filteredAndSortedUsers = useMemo(() => {
         let filtered = users.filter(user => {
             const safeUser = getSafeUser(user);
 
             if (filterRole !== 'all' && safeUser.role !== filterRole) return false;
+            if (showAdminsOnly && safeUser.role !== 'admin') return false;
 
             if (searchTerm) {
                 const term = searchTerm.toLowerCase();
@@ -136,46 +128,41 @@ const TeamPage: React.FC<TeamPageProps> = ({
         });
 
         return filtered;
-    }, [users, searchTerm, filterRole, sortBy, sortOrder, getSafeUser, getTasksForUser]);
+    }, [users, searchTerm, filterRole, sortBy, sortOrder, showAdminsOnly, getSafeUser, getTasksForUser]);
 
-    // ✅ FIXED: Get user stats
     const getUserStats = (userId: string) => {
         const userTasks = getTasksForUser(userId);
         const createdTasks = getTasksCreatedByUser(userId);
 
         const totalTasks = userTasks.length;
         const completedTasks = userTasks.filter(t => t.status === 'completed').length;
-        const pendingTasks = userTasks.filter(t => t.status !== 'completed').length;
         const overdueTasks = userTasks.filter(t => isOverdue(t.dueDate, t.status)).length;
         const tasksCreated = createdTasks.length;
 
         return {
             totalTasks,
             completedTasks,
-            pendingTasks,
             overdueTasks,
             tasksCreated,
             completionRate: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
         };
     };
 
-    // ✅ FIXED: Get role badge color
     const getRoleBadgeColor = (role: string) => {
         switch (role?.toLowerCase()) {
             case 'admin':
-                return 'bg-purple-100 text-purple-800 border-purple-200';
+                return 'bg-purple-50 text-purple-700 border border-purple-200';
             case 'manager':
-                return 'bg-blue-100 text-blue-800 border-blue-200';
+                return 'bg-blue-50 text-blue-700 border border-blue-200';
             case 'developer':
-                return 'bg-green-100 text-green-800 border-green-200';
+                return 'bg-emerald-50 text-emerald-700 border border-emerald-200';
             case 'designer':
-                return 'bg-pink-100 text-pink-800 border-pink-200';
+                return 'bg-pink-50 text-pink-700 border border-pink-200';
             default:
-                return 'bg-gray-100 text-gray-800 border-gray-200';
+                return 'bg-gray-50 text-gray-700 border border-gray-200';
         }
     };
 
-    // ✅ FIXED: Handle delete user
     const handleDeleteClick = (userId: string) => {
         setUserToDelete(userId);
         setShowDeleteModal(true);
@@ -202,13 +189,24 @@ const TeamPage: React.FC<TeamPageProps> = ({
         setShowDeleteModal(false);
         setUserToDelete(null);
     };
-
-    // ✅ FIXED: Toggle user details
-    const toggleUserDetails = (userId: string) => {
-        setExpandedUserId(expandedUserId === userId ? null : userId);
+    const handleTotalUsersClick = () => {
+        setShowTotalUsers(true);
+        setShowAdminsOnly(false);
+        setFilterRole('all');
     };
 
-    // ✅ FIXED: Get user initials
+    const handleAdminsClick = () => {
+        setShowAdminsOnly(true);
+        setShowTotalUsers(false);
+        setFilterRole('admin');
+    };
+
+    const clearAllFilters = () => {
+        setShowTotalUsers(false);
+        setShowAdminsOnly(false);
+        setFilterRole('all');
+    };
+
     const getUserInitials = (name: string | undefined): string => {
         if (!name) return 'U';
         const parts = name.trim().split(' ');
@@ -218,207 +216,149 @@ const TeamPage: React.FC<TeamPageProps> = ({
         return name.charAt(0).toUpperCase();
     };
 
-    // ✅ FIXED: Get user avatar (initials only, no image)
     const getUserAvatar = (user: UserType): JSX.Element => {
         const safeUser = getSafeUser(user);
         const initials = getUserInitials(safeUser.name);
 
         return (
             <div className="flex-shrink-0">
-                <div className="h-12 w-12 rounded-full bg-gradient-to-r from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg shadow">
+                <div className="h-12 w-12 rounded-lg bg-gradient-to-br from-gray-900 to-gray-700 flex items-center justify-center text-white font-semibold text-lg">
                     {initials}
                 </div>
             </div>
         );
     };
 
-    // ✅ FIXED: Get user tasks for display
-    const getUserTaskCards = (userId: string) => {
-        const userTasks = getTasksForUser(userId);
-
-        if (userTasks.length === 0) {
-            return (
-                <div className="text-center py-4 text-gray-500 text-sm">
-                    No tasks assigned to this user
-                </div>
-            );
-        }
-
-        return userTasks.slice(0, 5).map(task => {
-            const assignedByInfo = getAssignedByInfo(task);
-            const isTaskOverdue = isOverdue(task.dueDate, task.status);
-
-            return (
-                <div
-                    key={task.id}
-                    className="bg-white border border-gray-200 rounded-lg p-3 hover:shadow-md transition-shadow"
-                >
-                    <div className="flex justify-between items-start mb-2">
-                        <div className="flex-1">
-                            <h4 className="font-medium text-gray-900 text-sm truncate">
-                                {task.title || 'Untitled Task'}
-                            </h4>
-                            <p className="text-xs text-gray-500 mt-1 truncate">
-                                {task.description || 'No description'}
-                            </p>
-                        </div>
-                        <span className={`text-xs px-2 py-1 rounded-full ml-2 ${task.status === 'completed'
-                            ? 'bg-green-100 text-green-800'
-                            : task.status === 'in-progress'
-                                ? 'bg-blue-100 text-blue-800'
-                                : 'bg-yellow-100 text-yellow-800'
-                            }`}>
-                            {task.status.replace('-', ' ')}
-                        </span>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 mt-3">
-                        <div className="text-xs">
-                            <div className="text-gray-500">Due Date</div>
-                            <div className={`font-medium ${isTaskOverdue ? 'text-red-600' : 'text-gray-900'}`}>
-                                {formatDate(task.dueDate)}
-                            </div>
-                        </div>
-                        <div className="text-xs">
-                            <div className="text-gray-500">Priority</div>
-                            <div className={`font-medium ${task.priority === 'high' ? 'text-red-600'
-                                : task.priority === 'medium' ? 'text-yellow-600'
-                                    : 'text-green-600'
-                                }`}>
-                                {task.priority}
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="mt-2 text-xs text-gray-500">
-                        <div className="flex items-center">
-                            <User className="h-3 w-3 mr-1" />
-                            <span>Assigned by: {assignedByInfo.name}</span>
-                        </div>
-                    </div>
-                </div>
-            );
-        });
-    };
-
-    // ✅ FIXED: Main render
     return (
-        <div className="space-y-6">
+        <div className="space-y-8">
             {/* Header */}
             <div className="md:flex md:items-center md:justify-between">
                 <div className="flex-1 min-w-0">
-                    <h1 className="text-2xl font-bold leading-7 text-gray-900 sm:text-3xl sm:truncate">
-                        Team Management
-                    </h1>
-                    <p className="mt-1 text-sm text-gray-500">
-                        Manage your team members and their tasks
-                    </p>
-                </div>
-                <div className="mt-4 flex md:mt-0 md:ml-4 space-x-3">
-                    <button
-                        type="button"
-                        className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                        onClick={onAddUser}
-                    >
-                        <Plus className="h-4 w-4 mr-2" />
-                        Add Team Member
-                    </button>
-                </div>
-            </div>
-
-            {/* Stats Overview */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="bg-white rounded-lg shadow p-4">
-                    <div className="flex items-center">
-                        <div className="flex-shrink-0">
-                            <Users className="h-8 w-8 text-blue-600" />
-                        </div>
-                        <div className="ml-4">
-                            <p className="text-sm font-medium text-gray-500">Total Team Members</p>
-                            <p className="text-2xl font-bold text-gray-900">{users.length}</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="bg-white rounded-lg shadow p-4">
-                    <div className="flex items-center">
-                        <div className="flex-shrink-0">
-                            <CheckCircle className="h-8 w-8 text-green-600" />
-                        </div>
-                        <div className="ml-4">
-                            <p className="text-sm font-medium text-gray-500">Active Tasks</p>
-                            <p className="text-2xl font-bold text-gray-900">
-                                {tasks.filter(t => t.status !== 'completed').length}
+                    <div className="flex items-center space-x-3">
+                        <div>
+                            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
+                                Team Members
+                            </h1>
+                            <p className="mt-1 text-sm text-gray-500">
+                                Manage and organize your team effectively
                             </p>
                         </div>
                     </div>
                 </div>
+                {isCurrentUserAdmin && (
+                    <div className="mt-4 md:mt-0">
+                        <button
+                            type="button"
+                            className="inline-flex items-center px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 shadow-sm transition-colors"
+                            onClick={onAddUser}
+                        >
+                            <Plus className="h-4 w-4 mr-2" />
+                            Add Member
+                        </button>
+                    </div>
+                )}
+            </div>
 
-                <div className="bg-white rounded-lg shadow p-4">
-                    <div className="flex items-center">
-                        <div className="flex-shrink-0">
-                            <Shield className="h-8 w-8 text-purple-600" />
+            {/* Stats Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                <div
+                    className={`bg-white rounded-xl border ${showTotalUsers ? 'border-blue-300 shadow-sm' : 'border-gray-200'} p-5 cursor-pointer transition-all hover:border-gray-300 hover:shadow-sm`}
+                    onClick={handleTotalUsersClick}
+                >
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-sm font-medium text-gray-600 mb-1">Total Members</p>
+                            <p className="text-2xl font-bold text-gray-900">{users.length}</p>
                         </div>
-                        <div className="ml-4">
-                            <p className="text-sm font-medium text-gray-500">Admins</p>
+                        <div className="h-12 w-12 bg-blue-50 rounded-lg flex items-center justify-center">
+                            <Users className="h-6 w-6 text-blue-600" />
+                        </div>
+                    </div>
+                </div>
+
+                <div
+                    className={`bg-white rounded-xl border ${showAdminsOnly ? 'border-purple-300 shadow-sm' : 'border-gray-200'} p-5 cursor-pointer transition-all hover:border-gray-300 hover:shadow-sm`}
+                    onClick={handleAdminsClick}
+                >
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-sm font-medium text-gray-600 mb-1">Administrators</p>
                             <p className="text-2xl font-bold text-gray-900">
                                 {users.filter(u => u.role === 'admin').length}
                             </p>
                         </div>
-                    </div>
-                </div>
-
-                <div className="bg-white rounded-lg shadow p-4">
-                    <div className="flex items-center">
-                        <div className="flex-shrink-0">
-                            <Clock className="h-8 w-8 text-yellow-600" />
-                        </div>
-                        <div className="ml-4">
-                            <p className="text-sm font-medium text-gray-500">Overdue Tasks</p>
-                            <p className="text-2xl font-bold text-gray-900">
-                                {tasks.filter(t => isOverdue(t.dueDate, t.status)).length}
-                            </p>
+                        <div className="h-12 w-12 bg-purple-50 rounded-lg flex items-center justify-center">
+                            <Shield className="h-6 w-6 text-purple-600" />
                         </div>
                     </div>
                 </div>
             </div>
 
+            {/* Filter Status */}
+            {(showTotalUsers || showAdminsOnly) && (
+                <div className="bg-gray-50 rounded-xl border border-gray-200 px-4 py-3">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
+                            <div className={`h-2 w-2 rounded-full ${showTotalUsers ? 'bg-blue-500' : 'bg-purple-500'}`} />
+                            <span className="text-sm font-medium text-gray-800">
+                                {showTotalUsers && "Showing all team members"}
+                                {showAdminsOnly && "Showing administrators only"}
+                            </span>
+                        </div>
+                        <button
+                            onClick={clearAllFilters}
+                            className="text-sm font-medium text-blue-600 hover:text-blue-800 px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors"
+                        >
+                            Clear filter
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {/* Search and Filters */}
-            <div className="bg-white shadow rounded-lg p-4">
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0">
-                    <div className="flex-1 max-w-md">
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0">
+                    <div className="flex-1 max-w-lg">
                         <div className="relative">
-                            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                            <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                             <input
                                 type="search"
-                                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                placeholder="Search team members by name, email or role..."
+                                className="w-full pl-11 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                placeholder="Search members by name, email or role..."
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                             />
                         </div>
                     </div>
 
-                    <div className="flex items-center space-x-4">
+                    <div className="flex flex-wrap items-center gap-3">
                         <div className="flex items-center space-x-2">
                             <Filter className="h-4 w-4 text-gray-400" />
                             <select
-                                className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                 value={filterRole}
-                                onChange={(e) => setFilterRole(e.target.value)}
+                                onChange={(e) => {
+                                    setFilterRole(e.target.value);
+                                    if (e.target.value === 'admin') {
+                                        setShowAdminsOnly(true);
+                                        setShowTotalUsers(false);
+                                    } else if (e.target.value === 'all') {
+                                        setShowAdminsOnly(false);
+                                        setShowTotalUsers(false);
+                                    }
+                                }}
                             >
                                 <option value="all">All Roles</option>
                                 <option value="admin">Admin</option>
                                 <option value="manager">Manager</option>
                                 <option value="developer">Developer</option>
                                 <option value="designer">Designer</option>
-                                <option value="user">User</option>
                             </select>
                         </div>
 
                         <div className="flex items-center space-x-2">
                             <select
-                                className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                 value={sortBy}
                                 onChange={(e) => setSortBy(e.target.value as any)}
                             >
@@ -429,243 +369,171 @@ const TeamPage: React.FC<TeamPageProps> = ({
 
                             <button
                                 onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-                                className="p-2 border border-gray-300 rounded-md hover:bg-gray-50"
-                                title={sortOrder === 'asc' ? 'Sort Ascending' : 'Sort Descending'}
+                                className="h-10 w-10 bg-gray-50 border border-gray-200 rounded-lg flex items-center justify-center hover:bg-gray-100 transition-colors"
+                                title={sortOrder === 'asc' ? 'Sort Descending' : 'Sort Ascending'}
                             >
                                 {sortOrder === 'asc' ? (
-                                    <ChevronUp className="h-4 w-4" />
+                                    <ChevronUp className="h-4 w-4 text-gray-600" />
                                 ) : (
-                                    <ChevronDown className="h-4 w-4" />
+                                    <ChevronDown className="h-4 w-4 text-gray-600" />
                                 )}
-                            </button>
-                        </div>
-
-                        <div className="flex items-center space-x-2">
-                            <button
-                                onClick={() => setViewMode('grid')}
-                                className={`p-2 rounded ${viewMode === 'grid' ? 'bg-blue-100 text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
-                                title="Grid View"
-                            >
-                                <div className="grid grid-cols-2 gap-0.5">
-                                    <div className="h-1.5 w-1.5 bg-current"></div>
-                                    <div className="h-1.5 w-1.5 bg-current"></div>
-                                    <div className="h-1.5 w-1.5 bg-current"></div>
-                                    <div className="h-1.5 w-1.5 bg-current"></div>
-                                </div>
-                            </button>
-                            <button
-                                onClick={() => setViewMode('list')}
-                                className={`p-2 rounded ${viewMode === 'list' ? 'bg-blue-100 text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
-                                title="List View"
-                            >
-                                <div className="flex flex-col space-y-0.5">
-                                    <div className="h-1.5 w-4 bg-current"></div>
-                                    <div className="h-1.5 w-4 bg-current"></div>
-                                    <div className="h-1.5 w-4 bg-current"></div>
-                                </div>
                             </button>
                         </div>
                     </div>
                 </div>
             </div>
 
-            {/* Users Grid/List */}
-            <div className={viewMode === 'grid'
-                ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
-                : "space-y-4"
-            }>
+            {/* Users Grid Container */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {filteredAndSortedUsers.length === 0 ? (
-                    <div className="col-span-full text-center py-12">
-                        <Users className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-                        <p className="text-lg font-medium text-gray-900 mb-1">No team members found</p>
-                        <p className="text-gray-500">
-                            {searchTerm
-                                ? 'Try adjusting your search or filters'
-                                : 'Add your first team member to get started'}
+                    <div className="col-span-full text-center py-16">
+                        <div className="h-20 w-20 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
+                            <Users className="h-10 w-10 text-gray-400" />
+                        </div>
+                        <p className="text-lg font-semibold text-gray-900 mb-2">No members found</p>
+                        <p className="text-gray-500 max-w-md mx-auto text-sm">
+                            {searchTerm || filterRole !== 'all' || showAdminsOnly
+                                ? 'Try adjusting your search or filter criteria'
+                                : 'Start by adding your first team member'}
                         </p>
+                        {/* // *** IMPORTANT *** // The Add Team Member button logic was here and has been moved outside the grid conditional block below
+                */}
                     </div>
                 ) : (
                     filteredAndSortedUsers.map((user) => {
                         const safeUser = getSafeUser(user);
                         const userStats = getUserStats(safeUser.id);
-                        const isExpanded = expandedUserId === safeUser.id;
+                      
 
                         return (
                             <div
                                 key={safeUser.id}
-                                className={`bg-white rounded-lg shadow ${isExpanded ? 'shadow-lg' : 'hover:shadow-md'} transition-all duration-200 overflow-hidden`}
+                                className={`bg-white rounded-xl border border-gray-200 overflow-hidden transition-all duration-200 shadow-md border-gray-300 `}
                             >
                                 {/* User Card Header */}
-                                <div className="p-4">
+                                <div className="p-5">
                                     <div className="flex items-start justify-between">
-                                        <div className="flex items-center space-x-3">
+                                        <div className="flex items-center space-x-4">
                                             {getUserAvatar(user)}
-                                            <div>
-                                                <h3 className="font-semibold text-gray-900">
-                                                    {safeUser.name}
-                                                </h3>
-                                                <p className="text-sm text-gray-500 flex items-center">
-                                                    <Mail className="h-3 w-3 mr-1" />
-                                                    {safeUser.email}
-                                                </p>
-                                                <span className={`inline-block mt-1 px-2 py-1 text-xs font-medium rounded-full border ${getRoleBadgeColor(safeUser.role)}`}>
-                                                    {safeUser.role}
-                                                </span>
-                                            </div>
-                                        </div>
-
-                                        <div className="flex items-center space-x-1">
-                                            <button
-                                                onClick={() => toggleUserDetails(safeUser.id)}
-                                                className="p-1 text-gray-400 hover:text-gray-600 rounded"
-                                                title={isExpanded ? 'Collapse' : 'Expand'}
-                                            >
-                                                {isExpanded ? (
-                                                    <ChevronUp className="h-5 w-5" />
-                                                ) : (
-                                                    <ChevronDown className="h-5 w-5" />
-                                                )}
-                                            </button>
-
-                                            <div className="relative">
-                                                <button
-                                                    className="p-1 text-gray-400 hover:text-gray-600 rounded"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        // You can add dropdown menu here
-                                                    }}
-                                                >
-                                                    <MoreVertical className="h-5 w-5" />
-                                                </button>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-start justify-between">
+                                                    <div>
+                                                        <h3 className="font-semibold text-gray-900 truncate">
+                                                            {safeUser.name}
+                                                        </h3>
+                                                        <p className="text-sm text-gray-500 flex items-center mt-1">
+                                                            <Mail className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" />
+                                                            <span className="truncate">{safeUser.email}</span>
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center mt-3 space-x-2">
+                                                    <span className={`px-3 py-1 text-xs font-medium rounded-lg ${getRoleBadgeColor(safeUser.role)}`}>
+                                                        {safeUser.role}
+                                                    </span>
+                                                    {userStats.completionRate > 0 && (
+                                                        <span className="px-2 py-1 text-xs font-medium bg-emerald-50 text-emerald-700 rounded-lg border border-emerald-100">
+                                                            {userStats.completionRate}% completion
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
 
-                                    {/* User Stats */}
-                                    <div className="grid grid-cols-2 gap-3 mt-4">
-                                        <div className="bg-gray-50 rounded p-2">
-                                            <div className="text-xs text-gray-500">Assigned Tasks</div>
+                                    {/* Performance Stats */}
+                                    <div className="grid grid-cols-2 gap-3 mt-5">
+                                        <div className="bg-gray-50 rounded-lg p-3">
+                                            <div className="text-xs font-medium text-gray-600 mb-1">Total Tasks</div>
                                             <div className="text-lg font-bold text-gray-900">
                                                 {userStats.totalTasks}
                                             </div>
                                         </div>
-                                        <div className="bg-gray-50 rounded p-2">
-                                            <div className="text-xs text-gray-500">Completion Rate</div>
+                                        <div className="bg-gray-50 rounded-lg p-3">
+                                            <div className="text-xs font-medium text-gray-600 mb-1">Completed</div>
                                             <div className="text-lg font-bold text-gray-900">
-                                                {userStats.completionRate}%
+                                                {userStats.completedTasks}
                                             </div>
                                         </div>
+                                    </div>
+
+                                    {/* Action Buttons */}
+                                    <div className="flex space-x-2 mt-5">
+                                        <button
+                                            onClick={() => onEditUser(user)}
+                                            className="flex-1 px-4 py-2.5 text-sm font-medium bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-colors"
+                                        >
+                                            <Edit className="h-4 w-4 inline mr-2" />
+                                            Edit
+                                        </button>
+                                        {isCurrentUserAdmin && (
+                                            <button
+                                                onClick={() => handleDeleteClick(safeUser.id)}
+                                                disabled={deletingUserId === safeUser.id}
+                                                className="flex-1 px-4 py-2.5 text-sm font-medium bg-white border border-red-300 text-red-700 rounded-lg hover:bg-red-50 hover:border-red-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                {deletingUserId === safeUser.id ? (
+                                                    <>
+                                                        <span className="animate-spin h-4 w-4 inline mr-2">⏳</span>
+                                                        Deleting...
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <Trash2 className="h-4 w-4 inline mr-2" />
+                                                        Remove
+                                                    </>
+                                                )}
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
-
-                                {/* Expanded Details */}
-                                {isExpanded && (
-                                    <div className="border-t border-gray-200">
-                                        <div className="p-4">
-                                            <div className="grid grid-cols-2 gap-4 mb-4">
-                                                <div className="text-center">
-                                                    <div className={`h-12 w-12 rounded-full flex items-center justify-center mx-auto mb-2 ${userStats.completedTasks > 0 ? 'bg-green-100' : 'bg-gray-100'}`}>
-                                                        <CheckCircle className={`h-6 w-6 ${userStats.completedTasks > 0 ? 'text-green-600' : 'text-gray-400'}`} />
-                                                    </div>
-                                                    <div className="text-sm font-medium text-gray-900">
-                                                        {userStats.completedTasks}
-                                                    </div>
-                                                    <div className="text-xs text-gray-500">Completed</div>
-                                                </div>
-
-                                                <div className="text-center">
-                                                    <div className={`h-12 w-12 rounded-full flex items-center justify-center mx-auto mb-2 ${userStats.overdueTasks > 0 ? 'bg-red-100' : 'bg-gray-100'}`}>
-                                                        <AlertCircle className={`h-6 w-6 ${userStats.overdueTasks > 0 ? 'text-red-600' : 'text-gray-400'}`} />
-                                                    </div>
-                                                    <div className="text-sm font-medium text-gray-900">
-                                                        {userStats.overdueTasks}
-                                                    </div>
-                                                    <div className="text-xs text-gray-500">Overdue</div>
-                                                </div>
-                                            </div>
-
-                                            {/* Recent Tasks */}
-                                            <div>
-                                                <h4 className="font-medium text-gray-900 mb-2">Recent Tasks</h4>
-                                                <div className="space-y-2">
-                                                    {getUserTaskCards(safeUser.id)}
-                                                </div>
-
-                                                {userStats.totalTasks > 5 && (
-                                                    <div className="mt-3 text-center">
-                                                        <button className="text-sm text-blue-600 hover:text-blue-800">
-                                                            View all {userStats.totalTasks} tasks →
-                                                        </button>
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            {/* Actions */}
-                                            <div className="flex justify-end space-x-2 mt-4 pt-4 border-t border-gray-200">
-                                                <button
-                                                    onClick={() => onEditUser(user)}
-                                                    className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
-                                                >
-                                                    <Edit className="h-3 w-3 inline mr-1" />
-                                                    Edit
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDeleteClick(safeUser.id)}
-                                                    disabled={deletingUserId === safeUser.id}
-
-                                                    className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
-                                                >
-                                                    {deletingUserId === safeUser.id ? (
-                                                        <>
-                                                            <span className="animate-spin h-3 w-3 inline mr-1">⏳</span>
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <Trash2 className="h-3 w-3 inline mr-1" />
-                                                            Delete
-                                                        </>
-                                                    )}
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
                             </div>
                         );
                     })
                 )}
             </div>
+            {isCurrentUserAdmin && (
+                <div className="mt-6 flex justify-start">
+                    <button
+                        onClick={onAddUser}
+                        className="inline-flex items-center px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 shadow-sm"
+                    >
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add Team Member
+                    </button>
+                </div>
+            )}
+
 
             {/* Delete Confirmation Modal */}
             {showDeleteModal && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
-                        <h3 className="text-lg font-bold text-gray-900 mb-2">Delete User</h3>
-                        <p className="text-gray-600 mb-4">
-                            Are you sure you want to delete this user? This action cannot be undone.
-                        </p>
-
-                        <div className="bg-red-50 border border-red-200 rounded p-3 mb-4">
-                            <p className="text-sm text-red-800">
-                                <strong>Warning:</strong> All tasks assigned to this user will also be removed.
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-xl max-w-md w-full">
+                        <div className="p-6">
+                            <div className="h-12 w-12 mx-auto mb-4 bg-red-50 rounded-lg flex items-center justify-center">
+                                <Trash2 className="h-6 w-6 text-red-600" />
+                            </div>
+                            <h3 className="text-lg font-semibold text-gray-900 text-center mb-2">Remove Team Member</h3>
+                            <p className="text-gray-600 text-center mb-6 text-sm">
+                                This action cannot be undone. All assigned tasks will be removed.
                             </p>
-                        </div>
 
-                        <div className="flex justify-end space-x-3">
-                            <button
-                                onClick={handleCancelDelete}
-                                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                                disabled={!!deletingUserId}
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={handleConfirmDelete}
-                                disabled={!!deletingUserId}
-                                className="px-4 py-2 text-sm font-medium text-white bg-red-600 border border-transparent rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50"
-                            >
-                                {deletingUserId ? 'Deleting...' : 'Delete User'}
-                            </button>
+                            <div className="flex justify-center space-x-3">
+                                <button
+                                    onClick={handleCancelDelete}
+                                    className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-colors"
+                                    disabled={!!deletingUserId}
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleConfirmDelete}
+                                    disabled={!!deletingUserId}
+                                    className="px-5 py-2.5 text-sm font-medium text-white bg-red-600 border border-transparent rounded-lg hover:bg-red-700 focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors disabled:opacity-50"
+                                >
+                                    {deletingUserId ? 'Removing...' : 'Remove User'}
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>

@@ -21,6 +21,14 @@ import {
   Upload,
   AlertTriangle,
   FileText,
+  Save,
+  XCircle,
+  ChevronDown,
+  ChevronUp,
+  Tag,
+  Building,
+  Layers,
+  FileClock,
 } from 'lucide-react';
 
 import type { Task, UserType, CommentType, TaskHistory } from '../Types/Types';
@@ -40,7 +48,7 @@ interface AllTasksPageProps {
   setSearchTerm: (term: string) => void;
   currentUser: UserType;
   users: UserType[];
-  onEditTask: (task: Task) => void;
+  onEditTask: (taskId: string, updatedTask: Partial<Task>) => Promise<Task | null>;
   onDeleteTask: (taskId: string) => Promise<void>;
   getEmailById?: (userId: any) => string;
   formatDate: (date: string) => string;
@@ -49,7 +57,7 @@ interface AllTasksPageProps {
   openMenuId: string | null;
   setOpenMenuId: (id: string | null) => void;
   onToggleTaskStatus: (taskId: string, currentStatus: Task['status'], doneByAdmin?: boolean) => Promise<void>;
-  onCreateTask: () => void;
+  onCreateTask: () => Promise<Task | void>;
   onSaveComment?: (taskId: string, comment: string) => Promise<CommentType | null>;
   onDeleteComment?: (taskId: string, commentId: string) => Promise<void>;
   onFetchTaskComments?: (taskId: string) => Promise<CommentType[]>;
@@ -129,6 +137,29 @@ interface TaskStatusInfo {
   badgeColor: string;
 }
 
+interface TaskFormData {
+  title: string;
+  description: string;
+  assignedTo: string;
+  dueDate: string;
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  taskType: string;
+  company: string;
+  brand: string;
+}
+
+interface HistoryDisplayItem {
+  id: string;
+  type: 'history' | 'comment';
+  data: TaskHistory | CommentType;
+  timestamp: string;
+  displayTime: string;
+  actionType: string;
+  color: string;
+  icon: React.ReactNode;
+  label: string;
+}
+
 // ==================== CONSTANTS ====================
 const COMPANY_BRAND_MAP: Record<string, string[]> = {
   'acs': ['chips', 'soy', 'saffola'],
@@ -143,6 +174,29 @@ const PRIORITY_ORDER: Record<string, number> = {
   'medium': 2,
   'low': 1,
   '': 0
+};
+
+const PRIORITY_OPTIONS = ['low', 'medium', 'high', 'urgent'] as const;
+const TASK_TYPE_OPTIONS = ['regular', 'troubleshoot', 'maintenance', 'development', 'bug', 'feature'] as const;
+const COMPANY_OPTIONS = ['acs', 'md inpex', 'tech solutions', 'global inc', 'other'] as const;
+
+// History action type constants
+const HISTORY_ACTION_CONFIG: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
+  'task_created': { color: 'bg-green-100 text-green-800 border-green-200', icon: <Plus className="h-3 w-3" />, label: 'Task Created' },
+  'task_edited': { color: 'bg-blue-100 text-blue-800 border-blue-200', icon: <Edit className="h-3 w-3" />, label: 'Task Edited' },
+  'task_deleted': { color: 'bg-red-100 text-red-800 border-red-200', icon: <Trash2 className="h-3 w-3" />, label: 'Task Deleted' },
+  'marked_completed': { color: 'bg-green-100 text-green-800 border-green-200', icon: <Check className="h-3 w-3" />, label: 'Marked Completed' },
+  'marked_pending': { color: 'bg-yellow-100 text-yellow-800 border-yellow-200', icon: <Clock className="h-3 w-3" />, label: 'Marked Pending' },
+  'admin_approved': { color: 'bg-purple-100 text-purple-800 border-purple-200', icon: <CheckCircle className="h-3 w-3" />, label: 'Admin Approved' },
+  'rejected_by_admin': { color: 'bg-red-100 text-red-800 border-red-200', icon: <X className="h-3 w-3" />, label: 'Rejected by Admin' },
+  'assigner_permanent_approved': { color: 'bg-indigo-100 text-indigo-800 border-indigo-200', icon: <Eye className="h-3 w-3" />, label: 'Permanently Approved' },
+  'permanent_approval_removed': { color: 'bg-gray-100 text-gray-800 border-gray-200', icon: <EyeOff className="h-3 w-3" />, label: 'Permanent Approval Removed' },
+  'task_reassigned': { color: 'bg-cyan-100 text-cyan-800 border-cyan-200', icon: <UserPlus className="h-3 w-3" />, label: 'Task Reassigned' },
+  'priority_changed': { color: 'bg-orange-100 text-orange-800 border-orange-200', icon: <AlertTriangle className="h-3 w-3" />, label: 'Priority Changed' },
+  'due_date_changed': { color: 'bg-pink-100 text-pink-800 border-pink-200', icon: <Calendar className="h-3 w-3" />, label: 'Due Date Changed' },
+  'status_changed': { color: 'bg-teal-100 text-teal-800 border-teal-200', icon: <RefreshCcw className="h-3 w-3" />, label: 'Status Changed' },
+  'comment_added': { color: 'bg-blue-100 text-blue-800 border-blue-200', icon: <MessageSquare className="h-3 w-3" />, label: 'Comment Added' },
+  'default': { color: 'bg-gray-100 text-gray-800 border-gray-200', icon: <History className="h-3 w-3" />, label: 'Activity' }
 };
 
 // ==================== UTILITY FUNCTIONS ====================
@@ -170,22 +224,19 @@ const getTaskWithDemoData = (task: Task): Task => {
   };
 };
 
-const formatCommentTime = (timestamp: string): string => {
+const formatDateTime = (timestamp: string): string => {
   try {
     const date = new Date(timestamp);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString();
+    return date.toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
   } catch {
-    return 'Recently';
+    return timestamp;
   }
 };
 
@@ -322,8 +373,257 @@ const validateBulkDraft = (draft: BulkTaskDraft): BulkTaskDraft => {
 
 // ==================== COMPONENTS ====================
 
+// Edit Task Modal Component
+const EditTaskModal = memo(({
+  showEditModal,
+  editingTask,
+  editFormData,
+  editLoading,
+  users,
+  onClose,
+  onFormChange,
+  onSubmit
+}: {
+  showEditModal: boolean;
+  editingTask: Task | null;
+  editFormData: TaskFormData;
+  editLoading: boolean;
+  users: UserType[];
+  onClose: () => void;
+  onFormChange: (field: keyof TaskFormData, value: string) => void;
+  onSubmit: () => Promise<void>;
+}) => {
+  if (!showEditModal || !editingTask) return null;
+
+  const availableBrands = editFormData.company && COMPANY_BRAND_MAP[editFormData.company]
+    ? COMPANY_BRAND_MAP[editFormData.company]
+    : [];
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose}></div>
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">Edit Task</h2>
+            <p className="text-sm text-gray-500">Update task details below</p>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-full hover:bg-gray-100 text-gray-500">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto px-6 py-4">
+          <div className="space-y-4">
+            {/* Task Title */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Task Title *
+              </label>
+              <input
+                type="text"
+                value={editFormData.title}
+                onChange={(e) => onFormChange('title', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter task title"
+              />
+            </div>
+
+            {/* Description */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Description
+              </label>
+              <textarea
+                value={editFormData.description}
+                onChange={(e) => onFormChange('description', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[100px]"
+                placeholder="Enter task description"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Assigned To */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Assigned To *
+                </label>
+                <select
+                  value={editFormData.assignedTo}
+                  onChange={(e) => onFormChange('assignedTo', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                >
+                  <option value="">Select assignee</option>
+                  {users.map(user => (
+                    <option key={user.id} value={user.email}>
+                      {user.name} ({user.email})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Due Date */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Due Date *
+                </label>
+                <input
+                  type="date"
+                  value={editFormData.dueDate}
+                  onChange={(e) => onFormChange('dueDate', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  min={new Date().toISOString().split('T')[0]}
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Can be today's date or any future date
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Priority */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Priority
+                </label>
+                <select
+                  value={editFormData.priority}
+                  onChange={(e) => onFormChange('priority', e.target.value as TaskFormData['priority'])}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                >
+                  {PRIORITY_OPTIONS.map(priority => (
+                    <option key={priority} value={priority}>
+                      {priority.charAt(0).toUpperCase() + priority.slice(1)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Task Type */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Task Type
+                </label>
+                <select
+                  value={editFormData.taskType}
+                  onChange={(e) => onFormChange('taskType', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                >
+                  <option value="">Select type</option>
+                  {TASK_TYPE_OPTIONS.map(type => (
+                    <option key={type} value={type}>
+                      {type.charAt(0).toUpperCase() + type.slice(1)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Company */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Company
+                </label>
+                <select
+                  value={editFormData.company}
+                  onChange={(e) => onFormChange('company', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                >
+                  <option value="">Select company</option>
+                  {COMPANY_OPTIONS.map(company => (
+                    <option key={company} value={company}>
+                      {company.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Brand */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Brand
+                </label>
+                <select
+                  value={editFormData.brand}
+                  onChange={(e) => onFormChange('brand', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  disabled={!editFormData.company}
+                >
+                  <option value="">Select brand</option>
+                  {availableBrands.map(brand => (
+                    <option key={brand} value={brand}>
+                      {brand.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
+                    </option>
+                  ))}
+                  <option value="other">Other</option>
+                </select>
+                {!editFormData.company && (
+                  <p className="text-xs text-gray-500 mt-1">Select a company first</p>
+                )}
+              </div>
+            </div>
+
+            {editFormData.brand === 'other' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Custom Brand Name
+                </label>
+                <input
+                  type="text"
+                  value={editFormData.brand === 'other' ? '' : editFormData.brand}
+                  onChange={(e) => onFormChange('brand', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter custom brand name"
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="px-6 py-4 border-t bg-white flex items-center justify-between">
+          <div className="text-sm text-gray-500">
+            Make changes and save to update the task
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 text-sm border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 flex items-center gap-2"
+            >
+              <XCircle className="h-4 w-4" />
+              Cancel
+            </button>
+            <button
+              onClick={onSubmit}
+              disabled={editLoading || !editFormData.title.trim() || !editFormData.assignedTo.trim() || !editFormData.dueDate}
+              className={`px-4 py-2 text-sm font-medium rounded-lg text-white flex items-center gap-2 ${editLoading || !editFormData.title.trim() || !editFormData.assignedTo.trim() || !editFormData.dueDate
+                ? 'bg-gray-300 cursor-not-allowed'
+                : 'bg-blue-600 hover:bg-blue-700'
+                }`}
+            >
+              {editLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4" />
+                  Save Changes
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+EditTaskModal.displayName = 'EditTaskModal';
+
 // Task Status Badge Component
-const TaskStatusBadge = memo(({ taskId, tasks }: {
+const TaskStatusBadge = memo(({ taskId, tasks, currentUser }: {
   taskId: string;
   tasks: Task[];
   currentUser: UserType;
@@ -632,7 +932,7 @@ const BulkImporter = memo(({
   submitting: boolean;
   summary: BulkCreateResult | null;
 }) => {
-  const hasDrafts = draftTasks.length > 0;
+  const [bulkTaskInput, setBulkTaskInput] = useState<string>('');
 
   const handleFieldChange = useCallback((id: string, field: keyof BulkTaskDraft, value: string) => {
     onDraftsChange(draftTasks.map(task =>
@@ -644,43 +944,96 @@ const BulkImporter = memo(({
     onDraftsChange(draftTasks.filter(task => task.id !== id));
   }, [draftTasks, onDraftsChange]);
 
-  const errorCount = draftTasks.reduce((count, task) => count + task.errors.length, 0);
-
-  const handleValidateDrafts = useCallback(() => {
-    const validatedDrafts = draftTasks.map(draft => validateBulkDraft(draft));
-    onDraftsChange(validatedDrafts);
-  }, [draftTasks, onDraftsChange]);
-
-  useEffect(() => {
-    if (draftTasks.length > 0) {
-      handleValidateDrafts();
+  const handleParseBulkInput = useCallback(() => {
+    if (!bulkTaskInput.trim()) {
+      toast.error('Please enter task titles');
+      return;
     }
-  }, [draftTasks, handleValidateDrafts]);
+
+    const taskTitles = bulkTaskInput.trim().split('\n')
+      .map(title => title.trim())
+      .filter(title => title.length > 0);
+
+    if (taskTitles.length === 0) {
+      toast.error('No valid tasks found');
+      return;
+    }
+
+    const drafts: BulkTaskDraft[] = taskTitles.map((title, index) => {
+      const draftId = `draft-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const errors: string[] = [];
+
+      if (!title.trim()) {
+        errors.push('Task title is required');
+      }
+
+      return {
+        id: draftId,
+        rowNumber: index + 1,
+        title,
+        description: '',
+        assignedTo: defaults.assignedTo,
+        dueDate: defaults.dueDate,
+        priority: defaults.priority as BulkPriority,
+        taskType: defaults.taskType,
+        companyName: defaults.companyName,
+        brand: defaults.brand,
+        errors
+      };
+    });
+
+    onDraftsChange(drafts);
+    setBulkTaskInput('');
+    toast.success(`✅ ${taskTitles.length} tasks parsed successfully`);
+  }, [bulkTaskInput, defaults, onDraftsChange]);
+
+  const handleAddSingleTask = useCallback(() => {
+    const draftId = `draft-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    const newDraft: BulkTaskDraft = {
+      id: draftId,
+      rowNumber: draftTasks.length + 1,
+      title: '',
+      description: '',
+      assignedTo: defaults.assignedTo,
+      dueDate: defaults.dueDate,
+      priority: defaults.priority as BulkPriority,
+      taskType: defaults.taskType,
+      companyName: defaults.companyName,
+      brand: defaults.brand,
+      errors: []
+    };
+
+    onDraftsChange([...draftTasks, newDraft]);
+  }, [draftTasks, defaults, onDraftsChange]);
+
+  const errorCount = draftTasks.reduce((count, task) => count + task.errors.length, 0);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose}></div>
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b">
           <div>
-            <h2 className="text-xl font-semibold text-gray-900">Bulk Task Import</h2>
-            <p className="text-sm text-gray-500">Paste rows from Excel/Sheets below and review before saving.</p>
+            <h2 className="text-xl font-semibold text-gray-900">Bulk Task Creator</h2>
           </div>
           <button onClick={onClose} className="p-2 rounded-full hover:bg-gray-100 text-gray-500">
             <X className="h-5 w-5" />
           </button>
         </div>
 
+        {/* Default Settings */}
         <div className="px-6 py-4 border-b bg-gray-50">
-          <div className="grid grid-cols-1 lg:grid-cols-6 gap-4">
-            <div className="lg:col-span-2">
-              <label className="block text-xs font-semibold text-gray-700 mb-1 uppercase tracking-wide">Default Assignee</label>
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-4">
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1">Default Assignee</label>
               <select
                 value={defaults.assignedTo}
                 onChange={(e) => onDefaultsChange({ assignedTo: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               >
-                <option value="">Select user</option>
+                <option value="">Select assignee</option>
                 {users.map(user => (
                   <option key={user.id || user.email} value={user.email}>
                     {user.name} ({user.email})
@@ -689,20 +1042,20 @@ const BulkImporter = memo(({
               </select>
             </div>
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1 uppercase tracking-wide">Default Due Date</label>
+              <label className="block text-xs font-semibold text-gray-700 mb-1">Default Due Date</label>
               <input
                 type="date"
                 value={defaults.dueDate}
                 onChange={(e) => onDefaultsChange({ dueDate: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1 uppercase tracking-wide">Default Priority</label>
+              <label className="block text-xs font-semibold text-gray-700 mb-1">Default Priority</label>
               <select
                 value={defaults.priority}
                 onChange={(e) => onDefaultsChange({ priority: e.target.value as BulkPriority })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               >
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>
@@ -710,80 +1063,87 @@ const BulkImporter = memo(({
                 <option value="urgent">Urgent</option>
               </select>
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1 uppercase tracking-wide">Default Type</label>
-              <input
-                type="text"
-                value={defaults.taskType}
-                onChange={(e) => onDefaultsChange({ taskType: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="regular"
-              />
+            <div className="flex items-end">
+              <button
+                onClick={handleAddSingleTask}
+                className="w-full px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium flex items-center justify-center gap-2"
+              >
+                <Plus className="h-4 w-4" />
+                Add Single Task
+              </button>
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1 uppercase tracking-wide">Default Company</label>
-              <input
-                type="text"
-                value={defaults.companyName}
-                onChange={(e) => onDefaultsChange({ companyName: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="company name"
-              />
+          </div>
+
+          {/* Bulk Input Section */}
+          <div className="mt-4">
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-xs font-semibold text-gray-700">Quick Paste Multiple Tasks</label>
+              <span className="text-xs text-gray-500">One task per line</span>
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1 uppercase tracking-wide">Default Brand</label>
-              <input
-                type="text"
-                value={defaults.brand}
-                onChange={(e) => onDefaultsChange({ brand: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder=""
+            <div className="flex gap-2">
+              <textarea
+                value={bulkTaskInput}
+                onChange={(e) => setBulkTaskInput(e.target.value)}
+                placeholder="Enter task titles (one per line):
+Fix login issue
+Update documentation
+Test mobile responsiveness
+Add user notifications
+..."
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm min-h-[100px]"
+                rows={4}
               />
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={handleParseBulkInput}
+                  disabled={!bulkTaskInput.trim()}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium"
+                >
+                  Add Tasks
+                </button>
+                <button
+                  onClick={() => {
+                    const sampleTasks = [
+                      "Fix login authentication issue",
+                      "Update API documentation",
+                      "Test mobile responsiveness",
+                      "Add user notification system",
+                      "Optimize database queries",
+                      "Fix CSS styling issues"
+                    ].join('\n');
+                    setBulkTaskInput(sampleTasks);
+                  }}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 text-sm"
+                >
+                  Load Sample
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="flex-1 overflow-auto px-6 py-4 space-y-4">
-          {!hasDrafts ? (
-            <div className="border-2 border-dashed border-gray-200 rounded-lg p-10 text-center bg-white">
-              <FileText className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-              <h3 className="text-lg font-semibold text-gray-800 mb-2">Paste tasks from Excel or Sheets</h3>
-              <p className="text-sm text-gray-500 max-w-2xl mx-auto mb-4">
-                Copy multiple rows (title, description, due date, assignee email, priority etc.) and paste directly here.
-                We will parse columns automatically. You can adjust defaults above for missing values.
-              </p>
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4 text-left text-sm">
-                <p className="font-medium mb-2">Expected format (tab-separated columns):</p>
-                <p className="text-gray-600">Title → Description → Assignee Email → Due Date → Priority → Type → Company → Brand</p>
-                <p className="text-gray-500 text-xs mt-2">Example: Fix login issue → Users can't login → john@example.com → 2024-12-25 → high → bug → ACS → chips</p>
-              </div>
-              <textarea
-                className="mt-4 w-full h-40 border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm font-mono"
-                placeholder="Paste rows here (one task per row)..."
-                onPaste={(e) => {
-                  const pasted = e.clipboardData.getData('text');
-                  e.preventDefault();
-                  const drafts = parseClipboardToDrafts(pasted, defaults);
-                  onDraftsChange(drafts);
-                }}
-              />
-              <p className="text-xs text-gray-400 mt-2">Press Ctrl+V (Cmd+V on Mac) to paste your Excel data</p>
+        {/* Tasks Table */}
+        <div className="flex-1 overflow-auto px-6 py-4">
+          {draftTasks.length === 0 ? (
+            <div className="text-center py-12">
+              <FileText className="h-16 w-16 mx-auto text-gray-300 mb-4" />
+              <h3 className="text-lg font-medium text-gray-700 mb-2">No tasks added yet</h3>
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3 text-sm">
-                  <span className="font-medium text-gray-700">{draftTasks.length} task(s) parsed</span>
+                <div className="flex items-center gap-3">
+                  <span className="font-medium text-gray-700">{draftTasks.length} task(s) to create</span>
                   {errorCount > 0 && (
                     <span className="inline-flex items-center gap-1 text-xs text-red-600 bg-red-50 px-2 py-1 rounded-full">
                       <AlertTriangle className="h-3 w-3" />
-                      {errorCount} validation issue(s)
+                      {errorCount} error(s) need fixing
                     </span>
                   )}
-                  {summary && (
-                    <span className="inline-flex items-center gap-2 text-xs text-blue-700 bg-blue-50 px-3 py-1 rounded-full">
-                      <CheckCircle className="h-3 w-3" />
-                      Created {summary.created.length}, {summary.failures.length} failed
+                  {summary && summary.failures.length > 0 && (
+                    <span className="inline-flex items-center gap-2 text-xs text-yellow-700 bg-yellow-50 px-3 py-1 rounded-full">
+                      <AlertTriangle className="h-3 w-3" />
+                      {summary.failures.length} failed to create
                     </span>
                   )}
                 </div>
@@ -792,7 +1152,7 @@ const BulkImporter = memo(({
                     onClick={() => navigator.clipboard.writeText(draftTasks.map(d => d.title).join('\n'))}
                     className="px-3 py-1.5 text-xs border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-100"
                   >
-                    Copy Titles
+                    Copy All Titles
                   </button>
                   <button
                     onClick={() => onDraftsChange([])}
@@ -803,99 +1163,80 @@ const BulkImporter = memo(({
                 </div>
               </div>
 
+              {/* Tasks Table */}
               <div className="border border-gray-200 rounded-xl overflow-hidden">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr className="text-xs uppercase tracking-wide text-gray-500">
-                      <th className="px-3 py-2">Row</th>
-                      <th className="px-3 py-2 w-48">Title *</th>
-                      <th className="px-3 py-2">Description</th>
-                      <th className="px-3 py-2 w-36">Assigned To *</th>
-                      <th className="px-3 py-2 w-32">Due Date *</th>
-                      <th className="px-3 py-2 w-28">Priority</th>
-                      <th className="px-3 py-2 w-32">Type</th>
-                      <th className="px-3 py-2 w-32">Company</th>
-                      <th className="px-3 py-2 w-32">Brand</th>
-                      <th className="px-3 py-2"></th>
+                      <th className="px-4 py-3 text-left w-16">#</th>
+                      <th className="px-4 py-3 text-left">Task Title *</th>
+                      <th className="px-4 py-3 text-left w-56">Assigned To *</th>
+                      <th className="px-4 py-3 text-left w-40">Due Date *</th>
+                      <th className="px-4 py-3 text-left w-20">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="bg-white divide-y divide-gray-100 text-sm">
-                    {draftTasks.map(draft => (
-                      <tr key={draft.id} className={draft.errors.length ? 'bg-red-50/40' : ''}>
-                        <td className="px-3 py-2 align-top text-xs text-gray-500">#{draft.rowNumber}</td>
-                        <td className="px-3 py-2 align-top">
-                          <input
-                            value={draft.title}
-                            onChange={(e) => handleFieldChange(draft.id, 'title', e.target.value)}
-                            className={`w-full px-2 py-1.5 border ${draft.errors.some(e => e.includes('Title')) ? 'border-red-300' : 'border-gray-200'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm`}
-                            placeholder="Task title"
-                          />
+                  <tbody className="bg-white divide-y divide-gray-100">
+                    {draftTasks.map((draft) => (
+                      <tr key={draft.id} className={draft.errors.length ? 'bg-red-50/30' : 'hover:bg-gray-50'}>
+                        {/* Index */}
+                        <td className="px-4 py-3">
+                          <div className="text-sm text-gray-500 font-medium">#{draft.rowNumber}</div>
                         </td>
-                        <td className="px-3 py-2 align-top">
-                          <textarea
-                            value={draft.description}
-                            onChange={(e) => handleFieldChange(draft.id, 'description', e.target.value)}
-                            className="w-full min-h-[60px] px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                            placeholder="Optional details"
-                          />
+
+                        {/* Task Title */}
+                        <td className="px-4 py-3">
+                          <div className="space-y-2">
+                            <input
+                              type="text"
+                              value={draft.title}
+                              onChange={(e) => handleFieldChange(draft.id, 'title', e.target.value)}
+                              className={`w-full px-3 py-2 border ${draft.errors.some(e => e.includes('Title')) ? 'border-red-300' : 'border-gray-200'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm`}
+                              placeholder="Enter task title"
+                            />
+                          </div>
+                          {draft.errors.some(e => e.includes('Title')) && (
+                            <p className="text-xs text-red-600 mt-1">Task title is required</p>
+                          )}
                         </td>
-                        <td className="px-3 py-2 align-top">
-                          <input
+
+                        {/* Assignee */}
+                        <td className="px-4 py-3">
+                          <select
                             value={draft.assignedTo}
                             onChange={(e) => handleFieldChange(draft.id, 'assignedTo', e.target.value)}
-                            className={`w-full px-2 py-1.5 border ${draft.errors.some(e => e.includes('Assignee') || e.includes('email')) ? 'border-red-300' : 'border-gray-200'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm`}
-                            placeholder="email@example.com"
-                          />
+                            className={`w-full px-3 py-2 border ${draft.errors.some(e => e.includes('Assignee') || e.includes('email')) ? 'border-red-300' : 'border-gray-200'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white`}
+                          >
+                            <option value="">Select assignee</option>
+                            {users.map(user => (
+                              <option key={user.id || user.email} value={user.email}>
+                                {user.name} ({user.email})
+                              </option>
+                            ))}
+                          </select>
+                          {draft.errors.some(e => e.includes('Assignee') || e.includes('email')) && (
+                            <p className="text-xs text-red-600 mt-1">Please select a valid assignee</p>
+                          )}
                         </td>
-                        <td className="px-3 py-2 align-top">
+
+                        {/* Due Date */}
+                        <td className="px-4 py-3">
                           <input
                             type="date"
                             value={draft.dueDate}
                             onChange={(e) => handleFieldChange(draft.id, 'dueDate', e.target.value)}
-                            className={`w-full px-2 py-1.5 border ${draft.errors.some(e => e.includes('date')) ? 'border-red-300' : 'border-gray-200'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm`}
+                            className={`w-full px-3 py-2 border ${draft.errors.some(e => e.includes('date')) ? 'border-red-300' : 'border-gray-200'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm`}
                           />
+                          {draft.errors.some(e => e.includes('date')) && (
+                            <p className="text-xs text-red-600 mt-1">Please select a valid date</p>
+                          )}
                         </td>
-                        <td className="px-3 py-2 align-top">
-                          <select
-                            value={draft.priority}
-                            onChange={(e) => handleFieldChange(draft.id, 'priority', e.target.value)}
-                            className="w-full px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                          >
-                            <option value="">Use default</option>
-                            <option value="low">Low</option>
-                            <option value="medium">Medium</option>
-                            <option value="high">High</option>
-                            <option value="urgent">Urgent</option>
-                          </select>
-                        </td>
-                        <td className="px-3 py-2 align-top">
-                          <input
-                            value={draft.taskType}
-                            onChange={(e) => handleFieldChange(draft.id, 'taskType', e.target.value)}
-                            className="w-full px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                            placeholder="Type"
-                          />
-                        </td>
-                        <td className="px-3 py-2 align-top">
-                          <input
-                            value={draft.companyName}
-                            onChange={(e) => handleFieldChange(draft.id, 'companyName', e.target.value)}
-                            className="w-full px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                            placeholder="Company"
-                          />
-                        </td>
-                        <td className="px-3 py-2 align-top">
-                          <input
-                            value={draft.brand}
-                            onChange={(e) => handleFieldChange(draft.id, 'brand', e.target.value)}
-                            className="w-full px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                            placeholder="Brand"
-                          />
-                        </td>
-                        <td className="px-3 py-2 align-top">
+
+                        {/* Actions */}
+                        <td className="px-4 py-3">
                           <button
                             onClick={() => handleRemoveDraft(draft.id)}
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50"
+                            className="p-2 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                            title="Remove task"
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
@@ -906,26 +1247,36 @@ const BulkImporter = memo(({
                 </table>
               </div>
 
-              {draftTasks.map(draft => (
-                draft.errors.length > 0 ? (
-                  <div key={`${draft.id}-errors`} className="px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-                    <p className="font-medium">Row #{draft.rowNumber} has {draft.errors.length} issue(s):</p>
-                    <ul className="list-disc ml-5 mt-1 space-y-1">
-                      {draft.errors.map((error, idx) => (
-                        <li key={idx}>{error}</li>
-                      ))}
-                    </ul>
+              {/* Errors Summary */}
+              {draftTasks.some(draft => draft.errors.length > 0) && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2 text-red-700 font-medium mb-2">
+                    <AlertTriangle className="h-5 w-5" />
+                    Please fix the following errors before creating tasks:
                   </div>
-                ) : null
-              ))}
+                  <div className="space-y-2">
+                    {draftTasks.map(draft =>
+                      draft.errors.map((error, idx) => (
+                        <div key={`${draft.id}-error-${idx}`} className="text-sm text-red-600">
+                          <span className="font-medium">Row #{draft.rowNumber}:</span> {error}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
 
+              {/* Previous Summary (if any) */}
               {summary && summary.failures.length > 0 && (
-                <div className="px-4 py-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800">
-                  <p className="font-medium">{summary.failures.length} task(s) failed to create:</p>
-                  <ul className="list-disc ml-5 mt-1 space-y-1">
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2 text-yellow-800 font-medium mb-2">
+                    <AlertTriangle className="h-5 w-5" />
+                    Previous run had {summary.failures.length} failure(s)
+                  </div>
+                  <ul className="list-disc ml-5 text-sm text-yellow-700 space-y-1">
                     {summary.failures.map(failure => (
                       <li key={failure.index}>
-                        Row #{failure.rowNumber} - "{failure.title}" &mdash; {failure.reason}
+                        Row #{failure.rowNumber} - "{failure.title}" → {failure.reason}
                       </li>
                     ))}
                   </ul>
@@ -935,30 +1286,41 @@ const BulkImporter = memo(({
           )}
         </div>
 
+        {/* Footer */}
         <div className="px-6 py-4 border-t bg-white flex items-center justify-between">
           <div className="text-sm text-gray-500">
-            {hasDrafts
-              ? 'Review parsed tasks, fix validation errors, then click "Create tasks".'
-              : 'Paste data from your spreadsheet to get started.'}
+            {draftTasks.length === 0
+              ? 'Add tasks using the form above'
+              : `Ready to create ${draftTasks.length} task(s)`}
           </div>
           <div className="flex items-center gap-3">
-            <button onClick={onClose} className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">Cancel</button>
+            <button
+              onClick={onClose}
+              className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 font-medium"
+            >
+              Cancel
+            </button>
             <button
               onClick={onSubmit}
-              disabled={!hasDrafts || submitting || errorCount > 0}
-              className={`px-4 py-2 text-sm font-medium rounded-lg text-white transition-colors ${(!hasDrafts || errorCount > 0)
-                ? 'bg-gray-300 cursor-not-allowed'
-                : submitting
-                  ? 'bg-blue-400'
-                  : 'bg-blue-600 hover:bg-blue-700'
+              disabled={draftTasks.length === 0 || submitting || errorCount > 0}
+              className={`px-6 py-2 text-sm font-medium rounded-lg text-white transition-colors flex items-center gap-2 ${draftTasks.length === 0 || errorCount > 0
+                  ? 'bg-gray-300 cursor-not-allowed'
+                  : submitting
+                    ? 'bg-blue-400'
+                    : 'bg-blue-600 hover:bg-blue-700'
                 }`}
             >
               {submitting ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-2 inline" />
-                  Creating...
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Creating Tasks...
                 </>
-              ) : `Create ${draftTasks.length} task(s)`}
+              ) : (
+                <>
+                  <Check className="h-4 w-4" />
+                  Create {draftTasks.length} Task{draftTasks.length !== 1 ? 's' : ''}
+                </>
+              )}
             </button>
           </div>
         </div>
@@ -1038,7 +1400,6 @@ BulkActions.displayName = 'BulkActions';
 // Task Item Component (Mobile View)
 const MobileTaskItem = memo(({
   task,
-  isSelected,
   isToggling,
   isDeleting,
   isApproving,
@@ -1052,26 +1413,27 @@ const MobileTaskItem = memo(({
   getStatusBadgeColor,
   getStatusText,
   getUserInfoForDisplay,
-  getCommentCount,
-  onSelectTask,
   onToggleStatus,
-  onEditTask,
+  onEditTaskClick,
   onOpenCommentSidebar,
   onOpenReassignModal,
   onPermanentApproval,
   onOpenApprovalModal,
   onDeleteTask,
   onSetOpenMenuId,
+  isTaskAssignee,
   isTaskAssigner,
   isTaskCompleted,
   isTaskPermanentlyApproved,
-  isTaskPendingApproval
+  isTaskPendingApproval,
+  onOpenHistoryModal
 }: any) => {
   const userInfo = getUserInfoForDisplay(task);
-  const commentCount = getCommentCount(task);
   const isCompleted = isTaskCompleted(task.id);
   const isPermanentlyApproved = isTaskPermanentlyApproved(task.id);
+  const isPendingApproval = isTaskPendingApproval(task.id);
   const isAssigner = isTaskAssigner(task);
+  const isAssignee = isTaskAssignee(task);
   const isAdmin = currentUser?.role === 'admin';
 
   return (
@@ -1079,16 +1441,20 @@ const MobileTaskItem = memo(({
       <div className="p-4">
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              checked={isSelected}
-              onChange={() => onSelectTask(task.id)}
-              className="h-4 w-4 text-blue-600 rounded border-gray-300"
-            />
+            {isAssigner && !isPermanentlyApproved && isCompleted && (
+              <input
+                type="checkbox"
+                checked={isPermanentlyApproved}
+                onChange={() => onPermanentApproval(task.id, !isPermanentlyApproved)}
+                disabled={isUpdatingApproval}
+                className="h-4 w-4 text-blue-600 rounded border-gray-300"
+                title="Permanently approve this task"
+              />
+            )}
 
             <button
               onClick={() => onToggleStatus(task.id, task)}
-              disabled={isToggling}
+              disabled={isToggling || (isPermanentlyApproved && isAssignee && !isAssigner)}
               className={`p-1.5 rounded-full border ${isCompleted
                 ? 'bg-green-100 border-green-200 text-green-700'
                 : 'bg-gray-100 border-gray-200 text-gray-500'
@@ -1143,15 +1509,26 @@ const MobileTaskItem = memo(({
                   className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
                 >
                   <MessageSquare className="h-4 w-4" />
-                  View Details & Comments ({commentCount})
+                  View Details & Comments
                 </button>
 
                 <button
-                  onClick={() => onEditTask(task)}
+                  onClick={() => onEditTaskClick(task)}
                   className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
                 >
                   <Edit className="h-4 w-4" />
                   Edit Task
+                </button>
+
+                <button
+                  onClick={() => {
+                    onOpenHistoryModal(task);
+                    onSetOpenMenuId(null);
+                  }}
+                  className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
+                >
+                  <FileClock className="h-4 w-4" />
+                  View History
                 </button>
 
                 {isAdmin && (
@@ -1181,7 +1558,7 @@ const MobileTaskItem = memo(({
                   </button>
                 )}
 
-                {isAdmin && isTaskPendingApproval(task.id) && (
+                {isAdmin && isPendingApproval && (
                   <>
                     <button
                       onClick={() => onOpenApprovalModal(task, 'approve')}
@@ -1237,13 +1614,13 @@ const MobileTaskItem = memo(({
           </div>
           {task.company && (
             <div className="flex items-center gap-2 text-sm text-gray-600">
-              <span className="font-medium">Company:</span>
+              <Building className="h-4 w-4" />
               <span>{task.company}</span>
             </div>
           )}
           {task.brand && (
             <div className="flex items-center gap-2 text-sm text-gray-600">
-              <span className="font-medium">Brand:</span>
+              <Layers className="h-4 w-4" />
               <span>{task.brand}</span>
             </div>
           )}
@@ -1266,7 +1643,6 @@ MobileTaskItem.displayName = 'MobileTaskItem';
 // Desktop Task Item Component
 const DesktopTaskItem = memo(({
   task,
-  isSelected,
   isToggling,
   currentUser,
   formatDate,
@@ -1274,16 +1650,22 @@ const DesktopTaskItem = memo(({
   getTaskBorderColor,
   getTaskStatusIcon,
   getUserInfoForDisplay,
-  getCommentCount,
-  onSelectTask,
   onToggleStatus,
-  onEditTask,
+  onEditTaskClick,
   onOpenCommentSidebar,
   isTaskCompleted,
+  isTaskPermanentlyApproved,
+  isTaskAssignee,
+  isTaskAssigner,
+  onPermanentApproval,
+  isUpdatingApproval,
+  onOpenHistoryModal
 }: any) => {
   const userInfo = getUserInfoForDisplay(task);
-  const commentCount = getCommentCount(task);
   const isCompleted = isTaskCompleted(task.id);
+  const isPermanentlyApproved = isTaskPermanentlyApproved(task.id);
+  const isAssignee = isTaskAssignee(task);
+  const isAssigner = isTaskAssigner(task);
 
   return (
     <div className={`bg-white rounded-lg border ${getTaskBorderColor(task)} transition-all duration-200 hover:shadow-md`}>
@@ -1291,16 +1673,20 @@ const DesktopTaskItem = memo(({
         {/* Task Info - col-span-4 */}
         <div className="col-span-4">
           <div className="flex items-start gap-2">
-            <input
-              type="checkbox"
-              checked={isSelected}
-              onChange={() => onSelectTask(task.id)}
-              className="h-4 w-4 text-blue-600 rounded border-gray-300 mt-0.5"
-            />
+            {isAssigner && !isPermanentlyApproved && isCompleted && (
+              <input
+                type="checkbox"
+                checked={isPermanentlyApproved}
+                onChange={() => onPermanentApproval(task.id, !isPermanentlyApproved)}
+                disabled={isUpdatingApproval}
+                className="h-4 w-4 text-blue-600 rounded border-gray-300 mt-0.5"
+                title="Permanently approve this task"
+              />
+            )}
 
             <button
               onClick={() => onToggleStatus(task.id, task)}
-              disabled={isToggling}
+              disabled={isToggling || (isPermanentlyApproved && isAssignee && !isAssigner)}
               className="flex-shrink-0 p-1 hover:bg-gray-100 rounded mt-0.5"
               title={isCompleted ? 'Mark as pending' : 'Mark as completed'}
             >
@@ -1329,12 +1715,14 @@ const DesktopTaskItem = memo(({
 
               <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
                 {task.company && (
-                  <span className="bg-gray-100 px-2 py-0.5 rounded">
+                  <span className="bg-gray-100 px-2 py-0.5 rounded flex items-center gap-1">
+                    <Building className="h-3 w-3" />
                     {task.company}
                   </span>
                 )}
                 {task.brand && (
-                  <span className="bg-gray-100 px-2 py-0.5 rounded">
+                  <span className="bg-gray-100 px-2 py-0.5 rounded flex items-center gap-1">
+                    <Layers className="h-3 w-3" />
                     {task.brand}
                   </span>
                 )}
@@ -1388,11 +1776,11 @@ const DesktopTaskItem = memo(({
           />
         </div>
 
-        {/* Actions - col-span-1 */}
-        <div className="col-span-1">
+        {/* Actions - col-span-2 */}
+        <div className="col-span-2">
           <div className="flex items-center justify-end gap-2">
             <button
-              onClick={() => onEditTask(task)}
+              onClick={() => onEditTaskClick(task)}
               className="p-1 hover:bg-gray-100 rounded"
               title="Edit Task"
             >
@@ -1404,11 +1792,13 @@ const DesktopTaskItem = memo(({
               title="View Details & Comments"
             >
               <MessageSquare className="h-4 w-4 text-gray-500" />
-              {commentCount > 0 && (
-                <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">
-                  {commentCount}
-                </span>
-              )}
+            </button>
+            <button
+              onClick={() => onOpenHistoryModal(task)}
+              className="p-1 hover:bg-gray-100 rounded"
+              title="View Task History"
+            >
+              <FileClock className="h-4 w-4 text-gray-500" />
             </button>
           </div>
         </div>
@@ -1419,23 +1809,179 @@ const DesktopTaskItem = memo(({
 
 DesktopTaskItem.displayName = 'DesktopTaskItem';
 
+// History Timeline Component
+const PermanentHistoryTimeline = memo(({
+  timelineItems,
+  loadingHistory,
+  loadingComments,
+  currentUser,
+  formatDateTime
+}: {
+  timelineItems: HistoryDisplayItem[];
+  loadingHistory: boolean;
+  loadingComments: boolean;
+  currentUser: UserType;
+  formatDateTime: (date: string) => string;
+}) => {
+  const [expandedItems, setExpandedItems] = useState<string[]>([]);
+
+  const toggleExpand = (id: string) => {
+    setExpandedItems(prev =>
+      prev.includes(id)
+        ? prev.filter(itemId => itemId !== id)
+        : [...prev, id]
+    );
+  };
+
+  if (loadingHistory || loadingComments) {
+    return (
+      <div className="text-center py-8">
+        <Loader2 className="h-8 w-8 animate-spin mx-auto text-gray-400" />
+        <p className="mt-2 text-gray-500">Loading history...</p>
+      </div>
+    );
+  }
+
+  if (timelineItems.length === 0) {
+    return (
+      <div className="text-center py-8">
+        <FileClock className="h-12 w-12 mx-auto text-gray-300" />
+        <p className="mt-2 text-gray-500">No history available</p>
+        <p className="text-xs text-gray-400 mt-1">All activities will be permanently recorded here</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {timelineItems.map((item, index) => {
+        const isComment = item.type === 'comment';
+        const isExpanded = expandedItems.includes(item.id);
+        const isCurrentUserAuthor = isComment && (item.data as CommentType).userId === currentUser.id;
+
+        return (
+          <div
+            key={item.id}
+            className={`border-l-2 pl-4 pb-4 relative ${index !== timelineItems.length - 1 ? '' : ''}`}
+            style={{
+              borderLeftColor: isComment ? '#3b82f6' : '#10b981'
+            }}
+          >
+            {/* Timeline dot */}
+            <div className={`absolute -left-[9px] top-0 w-4 h-4 rounded-full border-2 ${isComment ? 'bg-blue-100 border-blue-300' : 'bg-green-100 border-green-300'}`}>
+              <div className="flex items-center justify-center w-full h-full">
+                {isComment ? (
+                  <MessageSquare className="h-2.5 w-2.5 text-blue-600" />
+                ) : (
+                  <History className="h-2.5 w-2.5 text-green-600" />
+                )}
+              </div>
+            </div>
+
+            <div className="ml-2">
+              <div className="flex items-start justify-between mb-1">
+                <div className="flex items-center gap-2">
+                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${isComment ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'}`}>
+                    {isComment ? <MessageSquare className="h-3 w-3" /> : <History className="h-3 w-3" />}
+                    {isComment ? 'Comment' : item.label}
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    {item.displayTime}
+                  </span>
+                </div>
+                {isComment && (
+                  <button
+                    onClick={() => toggleExpand(item.id)}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </button>
+                )}
+              </div>
+
+              {/* User info */}
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                <div className="text-sm font-medium text-gray-900">
+                  {isComment
+                    ? (item.data as CommentType).userName || 'User'
+                    : (item.data as TaskHistory).userName || 'System'}
+                </div>
+                <div className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-700">
+                  {isComment
+                    ? (item.data as CommentType).userRole || 'User'
+                    : (item.data as TaskHistory).userRole || 'System'}
+                </div>
+                <div className="text-xs text-gray-500">
+                  {isComment
+                    ? (item.data as CommentType).userEmail || ''
+                    : (item.data as TaskHistory).userEmail || ''}
+                </div>
+              </div>
+
+              {/* Content */}
+              <div className="mt-2">
+                {isComment ? (
+                  <div>
+                    <div className={`bg-gray-50 p-3 rounded-lg border ${isExpanded ? '' : 'max-h-20 overflow-hidden'}`}>
+                      <p className="text-sm text-gray-700 whitespace-pre-wrap">
+                        {(item.data as CommentType).content || 'No content'}
+                      </p>
+                    </div>
+                    <div className="mt-2 text-xs text-gray-500">
+                      <div className="font-medium">Permanent Comment</div>
+                      <div>Added on: {formatDateTime((item.data as CommentType).createdAt)}</div>
+                      {isCurrentUserAuthor && (
+                        <div className="text-blue-600 mt-1">✓ You are the author</div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-sm text-gray-600 bg-gray-50 p-3 rounded-lg border">
+                    <p className="font-medium mb-1">{(item.data as TaskHistory).description || 'No description'}</p>
+                    <div className="text-xs text-gray-500 space-y-1 mt-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">Action:</span>
+                        <span className="px-2 py-0.5 rounded bg-gray-100">{(item.data as TaskHistory).action?.replace(/_/g, ' ')}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">Time:</span>
+                        <span>{formatDateTime((item.data as TaskHistory).timestamp)}</span>
+                      </div>
+                      {(item.data as TaskHistory).additionalData && (
+                        <div className="mt-2 p-2 bg-yellow-50 rounded border border-yellow-100">
+                          <span className="font-medium">Details:</span>
+                          <pre className="text-xs mt-1 whitespace-pre-wrap">
+                            {JSON.stringify((item.data as TaskHistory).additionalData, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+});
+
+PermanentHistoryTimeline.displayName = 'PermanentHistoryTimeline';
+
 // Comment Sidebar Component
 const CommentSidebar = memo(({
   showCommentSidebar,
   selectedTask,
   newComment,
   commentLoading,
-  deletingCommentId,
-  loadingComments,
-  loadingHistory,
   currentUser,
   formatDate,
   isOverdue,
   onCloseSidebar,
   onSetNewComment,
   onSaveComment,
-  onDeleteComment,
-  getTimelineItems,
+  getTaskComments,
   getUserInfoForDisplay,
   isTaskCompleted,
   getStatusBadgeColor,
@@ -1443,18 +1989,18 @@ const CommentSidebar = memo(({
 }: any) => {
   if (!showCommentSidebar || !selectedTask) return null;
 
-  const timelineItems = getTimelineItems(selectedTask.id);
+  const taskComments = getTaskComments(selectedTask.id);
   const userInfo = getUserInfoForDisplay(selectedTask);
   const isCompleted = isTaskCompleted(selectedTask.id);
+  const [activeTab, setActiveTab] = useState<'details' | 'permanent-history'>('details');
 
   return (
     <div className="fixed inset-0 z-50">
-      <div
-        className="absolute inset-0 bg-black/20 backdrop-blur-sm"
+      <div className="absolute inset-0 bg-black/20 backdrop-blur-sm"
         onClick={onCloseSidebar}
       />
       <div className="absolute inset-y-0 right-0">
-        <div className="h-full bg-white shadow-xl overflow-y-auto w-full max-w-md transform transition-transform duration-300 ease-in-out">
+        <div className="h-full bg-white shadow-xl overflow-y-auto w-md transform transition-transform duration-300 ease-in-out">
           {/* Sidebar Header */}
           <div className="sticky top-0 bg-white border-b z-10">
             <div className="px-4 py-4">
@@ -1471,229 +2017,183 @@ const CommentSidebar = memo(({
                 </button>
               </div>
             </div>
+
+            {/* Tabs */}
+            <div className="flex border-b">
+              <button
+                onClick={() => setActiveTab('details')}
+                className={`flex-1 py-3 text-sm font-medium ${activeTab === 'details' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                Details
+              </button>
+              <button
+                onClick={() => setActiveTab('permanent-history')}
+                className={`flex-1 py-3 text-sm font-medium ${activeTab === 'permanent-history' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                History
+              </button>
+            </div>
           </div>
 
           {/* Sidebar Content */}
           <div className="p-4">
-            {/* Task Details Summary */}
-            <div className="mb-6 bg-gray-50 rounded-lg p-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <div className="text-xs font-medium text-gray-500 mb-1">Status</div>
-                  <div className={`inline-block px-2 py-1 text-xs rounded ${getStatusBadgeColor(selectedTask.id)}`}>
-                    {getStatusText(selectedTask.id)}
-                  </div>
-                </div>
-
-                <div>
-                  <div className="text-xs font-medium text-gray-500 mb-1">Priority</div>
-                  <div className={`inline-block px-2 py-1 text-xs rounded ${selectedTask.priority === 'high' ? 'bg-red-100 text-red-800' :
-                    selectedTask.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                      'bg-green-100 text-green-800'
-                    }`}>
-                    {selectedTask.priority || 'Not set'}
-                  </div>
-                </div>
-
-                <div className="col-span-2">
-                  <div className="text-xs font-medium text-gray-500 mb-1">Assigned To</div>
-                  <div className="text-sm">
-                    <div className="font-medium text-gray-900 truncate">
-                      {userInfo.name}
+            {activeTab === 'details' ? (
+              <>
+                {/* Task Details Summary */}
+                <div className="mb-6 bg-gray-50 rounded-lg p-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <div className="text-xs font-medium text-gray-500 mb-1">Status</div>
+                      <div className={`inline-block px-2 py-1 text-xs rounded ${getStatusBadgeColor(selectedTask.id)}`}>
+                        {getStatusText(selectedTask.id)}
+                      </div>
                     </div>
-                    <div className="text-gray-600 text-xs truncate">
-                      {userInfo.email}
-                    </div>
-                  </div>
-                </div>
 
-                <div className="col-span-2">
-                  <div className="text-xs font-medium text-gray-500 mb-1">Due Date</div>
-                  <div className="text-sm">
-                    <div className="text-gray-900">
-                      {formatDate(selectedTask.dueDate)}
+                    <div>
+                      <div className="text-xs font-medium text-gray-500 mb-1">Priority</div>
+                      <div className={`inline-block px-2 py-1 text-xs rounded ${selectedTask.priority === 'high' ? 'bg-red-100 text-red-800' :
+                        selectedTask.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-green-100 text-green-800'
+                        }`}>
+                        {selectedTask.priority || 'Not set'}
+                      </div>
                     </div>
-                    {isOverdue(selectedTask.dueDate, selectedTask.status) && !isCompleted && (
-                      <div className="text-red-600 text-xs mt-1">Overdue</div>
+
+                    <div className="col-span-2">
+                      <div className="text-xs font-medium text-gray-500 mb-1">Assigned To</div>
+                      <div className="text-sm">
+                        <div className="font-medium text-gray-900 truncate">
+                          {userInfo.name}
+                        </div>
+                        <div className="text-gray-600 text-xs truncate">
+                          {userInfo.email}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="col-span-2">
+                      <div className="text-xs font-medium text-gray-500 mb-1">Due Date</div>
+                      <div className="text-sm">
+                        <div className="text-gray-900">
+                          {formatDate(selectedTask.dueDate)}
+                        </div>
+                        {isOverdue(selectedTask.dueDate, selectedTask.status) && !isCompleted && (
+                          <div className="text-red-600 text-xs mt-1">Overdue</div>
+                        )}
+                      </div>
+                    </div>
+
+                    {selectedTask.type && (
+                      <div>
+                        <div className="text-xs font-medium text-gray-500 mb-1">Type</div>
+                        <div className="text-sm text-gray-900">
+                          {selectedTask.type}
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedTask.company && (
+                      <div>
+                        <div className="text-xs font-medium text-gray-500 mb-1">Company</div>
+                        <div className="text-sm text-gray-900">
+                          {selectedTask.company}
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedTask.brand && (
+                      <div>
+                        <div className="text-xs font-medium text-gray-500 mb-1">Brand</div>
+                        <div className="text-sm text-gray-900">
+                          {selectedTask.brand}
+                        </div>
+                      </div>
                     )}
                   </div>
                 </div>
-
-                {selectedTask.type && (
-                  <div>
-                    <div className="text-xs font-medium text-gray-500 mb-1">Type</div>
-                    <div className="text-sm text-gray-900">
-                      {selectedTask.type}
-                    </div>
+                {/* Add Comment Section */}
+                <div className="mt-8 pt-6 border-t">
+                  <h4 className="font-medium text-gray-900 mb-3">Add Comment</h4>
+                  <div className="flex gap-2">
+                    <textarea
+                      value={newComment}
+                      onChange={(e) => onSetNewComment(e.target.value)}
+                      placeholder="Type your comment here..."
+                      className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[80px] resize-none"
+                      rows={3}
+                    />
                   </div>
-                )}
-
-                {selectedTask.company && (
-                  <div>
-                    <div className="text-xs font-medium text-gray-500 mb-1">Company</div>
-                    <div className="text-sm text-gray-900">
-                      {selectedTask.company}
-                    </div>
-                  </div>
-                )}
-
-                {selectedTask.brand && (
-                  <div>
-                    <div className="text-xs font-medium text-gray-500 mb-1">Brand</div>
-                    <div className="text-sm text-gray-900">
-                      {selectedTask.brand}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Timeline Header */}
-            <div className="mb-4 flex items-center gap-2">
-              <History className="h-5 w-5 text-gray-500" />
-              <h3 className="font-bold text-gray-900">Activity Timeline</h3>
-              <span className="ml-auto text-xs text-gray-500">
-                {timelineItems.length} activities
-              </span>
-            </div>
-
-            {/* Timeline Items */}
-            <div className="space-y-3">
-              {loadingHistory[selectedTask.id] || loadingComments ? (
-                <div className="text-center py-8">
-                  <Loader2 className="h-8 w-8 animate-spin mx-auto text-gray-400" />
-                  <p className="mt-2 text-gray-500">Loading activity...</p>
-                </div>
-              ) : timelineItems.length === 0 ? (
-                <div className="text-center py-8">
-                  <MessageSquare className="h-12 w-12 mx-auto text-gray-300" />
-                  <p className="mt-2 text-gray-500">No activity yet</p>
-                  <p className="text-xs text-gray-400 mt-1">Add a comment or update task status to see activity</p>
-                </div>
-              ) : (
-                timelineItems.map((item: any, index: number) => (
-                  <div
-                    key={`${item.id}-${index}`}
-                    className={`border-l-2 pl-3 py-2 ${item.type === 'comment'
-                      ? 'border-blue-400 bg-blue-50/50'
-                      : 'border-gray-400 bg-gray-50/50'
-                      }`}
-                  >
-                    <div className="flex justify-between items-start">
-                      <div className="flex items-center gap-2">
-                        <div className={`p-1.5 rounded-full ${item.type === 'comment'
-                          ? 'bg-blue-100'
-                          : 'bg-gray-100'
-                          }`}>
-                          {item.type === 'comment' ? (
-                            <MessageSquare className="h-3.5 w-3.5 text-blue-600" />
-                          ) : (
-                            <History className="h-3.5 w-3.5 text-gray-600" />
-                          )}
-                        </div>
-                        <div>
-                          <div className="font-medium text-gray-900 text-sm">
-                            {item.type === 'comment'
-                              ? (item.data as CommentType).userName || 'User'
-                              : (item.data as TaskHistory).userName || 'System'}
-                          </div>
-                          <div className="text-xs text-gray-500">
-                            {item.type === 'comment'
-                              ? 'commented'
-                              : (item.data as TaskHistory).action?.replace(/_/g, ' ') || 'activity'}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        {item.displayTime}
-                      </div>
-                    </div>
-
-                    <div className="mt-2 text-sm text-gray-700">
-                      {item.type === 'comment' ? (
-                        <div>
-                          <p className="bg-white p-3 rounded-lg border border-gray-200 mt-2">
-                            {(item.data as CommentType).content || 'No content'}
-                          </p>
-                          <div className="mt-2 flex justify-between items-center">
-                            <span className="text-xs text-gray-500">
-                              {(item.data as CommentType).userEmail || 'Unknown'}
-                            </span>
-                            {currentUser.id === (item.data as CommentType).userId && onDeleteComment && (
-                              <button
-                                onClick={() => onDeleteComment((item.data as CommentType).id)}
-                                disabled={deletingCommentId === (item.data as CommentType).id}
-                                className="text-xs text-red-600 hover:text-red-800 hover:bg-red-50 px-2 py-1 rounded"
-                              >
-                                {deletingCommentId === (item.data as CommentType).id ? (
-                                  <span className="flex items-center gap-1">
-                                    <Loader2 className="h-3 w-3 animate-spin" />
-                                    Deleting...
-                                  </span>
-                                ) : 'Delete'}
-                              </button>
-                            )}
-                          </div>
-                        </div>
+                  <div className="flex justify-between items-center mt-3">
+                    <button
+                      onClick={onSaveComment}
+                      disabled={!newComment.trim() || commentLoading}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium flex items-center gap-2 transition-colors"
+                    >
+                      {commentLoading ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Sending...
+                        </>
                       ) : (
-                        <div>
-                          <p className="text-gray-600 bg-white p-3 rounded-lg border border-gray-200 mt-2">
-                            {(item.data as TaskHistory).description || 'No description'}
-                          </p>
-                          <div className="text-xs text-gray-500 mt-2">
-                            <div>Changed on: {new Date((item.data as TaskHistory).timestamp).toLocaleString()}</div>
-                            {(item.data as TaskHistory).userRole && (
-                              <div>Role: {(item.data as TaskHistory).userRole}</div>
+                        <>
+                          <Send className="h-4 w-4" />
+                          Add Comment
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  {!onSaveComment && (
+                    <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-700">
+                      ⚠️ Comment saving functionality is not available.
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Permanent History Tab */}
+                <div className="mb-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <FileClock className="h-5 w-5 text-blue-600" />
+                    <h3 className="font-bold text-gray-900">History</h3>
+                    <span className="ml-auto text-xs text-gray-500">
+                      {taskComments.length} records
+                    </span>
+                  </div>
+                </div>
+
+                {/* Permanent History Timeline */}
+                {taskComments.length === 0 ? (
+                  <div className="text-center py-8">
+                    <FileClock className="h-12 w-12 mx-auto text-gray-300" />
+                    <p className="mt-2 text-gray-500">No history available</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {taskComments.map((comment: CommentType) => (
+                      <div key={comment.id} className="border-l-2 border-blue-400 pl-4 pb-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <MessageSquare className="h-4 w-4 text-blue-500" />
+                          <span className="text-sm font-medium">Comment</span>
+                          <span className="text-xs text-gray-500 ml-auto">
+                            {formatDateTime(comment.createdAt)}
+                          </span>
+                        </div>
+                        <div className="bg-gray-50 p-3 rounded-lg">
+                          <p className="text-sm text-gray-700">{comment.content}</p>
+                          <div className="mt-2 text-xs text-gray-500">
+                            By: {comment.userName} ({comment.userRole})
+                            {comment.userId === currentUser.id && (
+                              <span className="text-blue-600 ml-2">✓ You</span>
                             )}
                           </div>
                         </div>
-                      )}
-                    </div>
+                      </div>
+                    ))}
                   </div>
-                ))
-              )}
-            </div>
-
-            {/* Add Comment Section */}
-            <div className="mt-8 pt-6 border-t">
-              <h4 className="font-medium text-gray-900 mb-3">Add Comment</h4>
-              <div className="flex gap-2">
-                <textarea
-                  value={newComment}
-                  onChange={(e) => onSetNewComment(e.target.value)}
-                  placeholder="Type your comment here..."
-                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[80px] resize-none"
-                  rows={3}
-                />
-              </div>
-              <div className="flex justify-between items-center mt-3">
-                <p className="text-xs text-gray-500">
-                  Comments are stored with task history
-                </p>
-                <button
-                  onClick={onSaveComment}
-                  disabled={!newComment.trim() || commentLoading}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium flex items-center gap-2 transition-colors"
-                >
-                  {commentLoading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Sending...
-                    </>
-                  ) : (
-                    <>
-                      <Send className="h-4 w-4" />
-                      Send Comment
-                    </>
-                  )}
-                </button>
-              </div>
-              {!onSaveComment && (
-                <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-700">
-                  ⚠️ Comment saving functionality is not available. Please check if the backend function is properly connected.
-                </div>
-              )}
-            </div>
+                )}
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -1819,6 +2319,114 @@ const ReassignModal = memo(({
 
 ReassignModal.displayName = 'ReassignModal';
 
+// Task History Modal Component
+const TaskHistoryModal = memo(({
+  showHistoryModal,
+  historyTask,
+  timelineItems,
+  loadingHistory,
+  loadingComments,
+  currentUser,
+  onClose,
+  formatDate
+}: {
+  showHistoryModal: boolean;
+  historyTask: Task | null;
+  timelineItems: HistoryDisplayItem[];
+  loadingHistory: boolean;
+  loadingComments: boolean;
+  currentUser: UserType;
+  onClose: () => void;
+  formatDate: (date: string) => string;
+}) => {
+  if (!showHistoryModal || !historyTask) return null;
+
+  // Format creation date for display
+  const formattedCreatedAt = formatDateTime(historyTask.createdAt || historyTask.updatedAt || new Date().toISOString());
+
+  return (
+    <div className="fixed inset-0 z-50">
+      <div
+        className="absolute inset-0 bg-black/20 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      <div className="absolute inset-0 flex items-center justify-center p-4">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden">
+          {/* Modal Header */}
+          <div className="sticky top-0 bg-white border-b z-10 px-6 py-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Task History</h2>
+                <p className="text-gray-600 text-sm mt-1">{historyTask.title}</p>
+                <div className="mt-2 text-sm text-gray-500">
+                  Created: {formattedCreatedAt}
+                </div>
+              </div>
+              <button
+                onClick={onClose}
+                className="p-2 hover:bg-gray-100 rounded-lg"
+              >
+                <X className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+          </div>
+
+          {/* Modal Content */}
+          <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+            <div className="mb-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="ml-auto text-xs text-gray-500">
+                  {timelineItems.length} records
+                </span>
+              </div>
+            </div>
+
+            {/* Task Creation Summary */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-full bg-white border-2 border-blue-300 flex items-center justify-center">
+                  <Plus className="h-5 w-5 text-blue-600" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-blue-900">Task Created</h4>
+                  <p className="text-sm text-blue-800">
+                    This task was created on {formattedCreatedAt}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <span className="font-medium text-gray-600">Priority:</span>
+                  <span className={`ml-2 px-2 py-0.5 rounded text-xs ${historyTask.priority === 'high' ? 'bg-red-100 text-red-800' :
+                    historyTask.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                      'bg-green-100 text-green-800'}`}>
+                    {historyTask.priority || 'Not set'}
+                  </span>
+                </div>
+                <div>
+                  <span className="font-medium text-gray-600">Due Date:</span>
+                  <span className="ml-2">{formatDate(historyTask.dueDate)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* History Timeline */}
+            <PermanentHistoryTimeline
+              timelineItems={timelineItems}
+              loadingHistory={loadingHistory}
+              loadingComments={loadingComments}
+              currentUser={currentUser}
+              formatDateTime={formatDateTime}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+TaskHistoryModal.displayName = 'TaskHistoryModal';
+
 // ==================== MAIN COMPONENT ====================
 const AllTasksPage: React.FC<AllTasksPageProps> = ({
   tasks,
@@ -1853,9 +2461,6 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
   onBulkCreateTasks
 }) => {
   // State
-  const [sortBy] = useState<'title' | 'dueDate' | 'status' | 'priority' | 'createdAt' | 'updatedAt' | 'assignee'>('dueDate');
-  const [sortOrder] = useState<'asc' | 'desc'>('asc');
-
   const [selectedTasks, setSelectedTasks] = useState<string[]>([]);
   const [deletingTasks, setDeletingTasks] = useState<string[]>([]);
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -1864,12 +2469,23 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
   const [updatingApproval, setUpdatingApproval] = useState<string[]>([]);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
-  // Minimal filter state setters used by legacy helper functions
-  const [, setPriorityFilter] = useState('all');
-  const [, setCategoryFilter] = useState('all');
-  const [, setTagFilter] = useState('all');
-  const [, setCreatedDateFilter] = useState('all');
-  const [, setProjectFilter] = useState('all');
+  // Edit Task Modal State
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [editFormData, setEditFormData] = useState<TaskFormData>({
+    title: '',
+    description: '',
+    assignedTo: '',
+    dueDate: new Date().toISOString().split('T')[0],
+    priority: 'medium',
+    taskType: '',
+    company: '',
+    brand: ''
+  });
+  const [editLoading, setEditLoading] = useState(false);
+  const [editChanges, setEditChanges] = useState<Partial<Task> | null>(null);
+
+  // Filter state
   const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilters>({
     status: 'all',
     priority: 'all',
@@ -1891,7 +2507,6 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
   const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null);
   const [loadingComments, setLoadingComments] = useState(false);
   const [taskComments, setTaskComments] = useState<Record<string, CommentType[]>>({});
-  const [commentViewMode, setCommentViewMode] = useState<'compact' | 'expanded'>('compact');
 
   // Task History State
   const [taskHistory, setTaskHistory] = useState<Record<string, TaskHistory[]>>({});
@@ -1905,6 +2520,8 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
   const [reassignTask, setReassignTask] = useState<Task | null>(null);
   const [newAssigneeId, setNewAssigneeId] = useState('');
   const [reassignLoading, setReassignLoading] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historyTask, setHistoryTask] = useState<Task | null>(null);
 
   // ==================== BULK IMPORT STATE ====================
   const [showBulkImporter, setShowBulkImporter] = useState(false);
@@ -1919,7 +2536,6 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
   const [bulkDraftTasks, setBulkDraftTasks] = useState<BulkTaskDraft[]>([]);
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
   const [bulkCreateSummary, setBulkCreateSummary] = useState<BulkCreateResult | null>(null);
-
 
   // ==================== UTILITY FUNCTIONS ====================
   const getEmailByIdInternal = useCallback((userId: any): string => {
@@ -2047,8 +2663,8 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
 
   const isTaskCompleted = useCallback((taskId: string): boolean => {
     const task = tasks.find(t => t.id === taskId);
-    return task?.status === 'completed' || isTaskPermanentlyApproved(taskId);
-  }, [tasks, isTaskPermanentlyApproved]);
+    return task?.status === 'completed';
+  }, [tasks]);
 
   const isTaskPendingApproval = useCallback((taskId: string): boolean => {
     const task = tasks.find(t => t.id === taskId);
@@ -2088,82 +2704,58 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
   const getStatusBadgeColor = useCallback((taskId: string) => {
     const isCompleted = isTaskCompleted(taskId);
     const isPermanentlyApproved = isTaskPermanentlyApproved(taskId);
+    const isPendingApproval = isTaskPendingApproval(taskId);
 
     if (isCompleted) {
       if (isPermanentlyApproved) {
         return 'bg-blue-100 text-blue-800 border border-blue-200';
+      } else if (isPendingApproval) {
+        return 'bg-yellow-100 text-yellow-800 border border-yellow-200';
       } else {
         return 'bg-green-100 text-green-800 border border-green-200';
       }
     }
-    return 'bg-yellow-100 text-yellow-800';
-  }, [isTaskCompleted, isTaskPermanentlyApproved]);
+    return 'bg-gray-100 text-gray-800 border border-gray-200';
+  }, [isTaskCompleted, isTaskPermanentlyApproved, isTaskPendingApproval]);
 
   const getStatusText = useCallback((taskId: string) => {
     const isCompleted = isTaskCompleted(taskId);
     const isPermanentlyApproved = isTaskPermanentlyApproved(taskId);
+    const isPendingApproval = isTaskPendingApproval(taskId);
 
     if (isCompleted) {
       if (isPermanentlyApproved) {
         return '✅ PERMANENTLY Approved';
-      } else {
+      } else if (isPendingApproval) {
         return '⏳ Pending Admin Approval';
+      } else {
+        return '✅ Approved';
       }
     }
     return 'Pending';
-  }, [isTaskCompleted, isTaskPermanentlyApproved]);
+  }, [isTaskCompleted, isTaskPermanentlyApproved, isTaskPendingApproval]);
 
-  // ==================== COMMENT FUNCTIONS ====================
-  const getCommentCount = useCallback((task: Task): number => {
-    let count = 0;
-
-    if (taskComments[task.id]) {
-      count += taskComments[task.id].length;
-    }
-
-    if (task.comments && Array.isArray(task.comments)) {
-      count += task.comments.length;
-    }
-    return count;
+  const getTaskCommentsInternal = useCallback((taskId: string): CommentType[] => {
+    return taskComments[taskId] || [];
   }, [taskComments]);
 
-  const getTimelineItems = useCallback((taskId: string): Array<{
-    id: string;
-    type: 'comment' | 'history';
-    data: CommentType | TaskHistory;
-    timestamp: string;
-    displayTime: string;
-  }> => {
-    const items: Array<{
-      id: string;
-      type: 'comment' | 'history';
-      data: CommentType | TaskHistory;
-      timestamp: string;
-      displayTime: string;
-    }> = [];
-
-    // Add comments from state
-    if (taskComments[taskId]) {
-      taskComments[taskId].forEach(comment => {
-        items.push({
-          id: `comment-${comment.id}`,
-          type: 'comment',
-          data: comment,
-          timestamp: comment.createdAt,
-          displayTime: formatCommentTime(comment.createdAt)
-        });
-      });
-    }
+  const getTimelineItems = useCallback((taskId: string): HistoryDisplayItem[] => {
+    const items: HistoryDisplayItem[] = [];
 
     // Add task history from state
     if (taskHistory[taskId]) {
       taskHistory[taskId].forEach(history => {
+        const config = HISTORY_ACTION_CONFIG[history.action] || HISTORY_ACTION_CONFIG.default;
         items.push({
           id: `history-${history.id}`,
           type: 'history',
           data: history,
           timestamp: history.timestamp,
-          displayTime: new Date(history.timestamp).toLocaleString()
+          displayTime: formatDateTime(history.timestamp),
+          actionType: history.action,
+          color: config.color,
+          icon: config.icon,
+          label: config.label
         });
       });
     }
@@ -2173,14 +2765,36 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
     if (task?.history && Array.isArray(task.history)) {
       task.history.forEach(history => {
         if (!items.some(item => item.type === 'history' && (item.data as TaskHistory).id === history.id)) {
+          const config = HISTORY_ACTION_CONFIG[history.action] || HISTORY_ACTION_CONFIG.default;
           items.push({
             id: `history-${history.id}`,
             type: 'history',
             data: history,
             timestamp: history.timestamp,
-            displayTime: new Date(history.timestamp).toLocaleString()
+            displayTime: formatDateTime(history.timestamp),
+            actionType: history.action,
+            color: config.color,
+            icon: config.icon,
+            label: config.label
           });
         }
+      });
+    }
+
+    // Add comments from state
+    if (taskComments[taskId]) {
+      taskComments[taskId].forEach(comment => {
+        items.push({
+          id: `comment-${comment.id}`,
+          type: 'comment',
+          data: comment,
+          timestamp: comment.createdAt,
+          displayTime: formatDateTime(comment.createdAt),
+          actionType: 'comment_added',
+          color: HISTORY_ACTION_CONFIG.comment_added.color,
+          icon: HISTORY_ACTION_CONFIG.comment_added.icon,
+          label: 'Comment Added'
+        });
       });
     }
 
@@ -2193,7 +2807,11 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
             type: 'comment',
             data: comment,
             timestamp: comment.createdAt,
-            displayTime: formatCommentTime(comment.createdAt)
+            displayTime: formatDateTime(comment.createdAt),
+            actionType: 'comment_added',
+            color: HISTORY_ACTION_CONFIG.comment_added.color,
+            icon: HISTORY_ACTION_CONFIG.comment_added.icon,
+            label: 'Comment Added'
           });
         }
       });
@@ -2201,6 +2819,257 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
 
     return items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   }, [taskComments, taskHistory, tasks]);
+
+  // ==================== HISTORY TRACKING FUNCTIONS ====================
+  const addHistoryRecord = useCallback(async (
+    taskId: string,
+    action: TaskHistory['action'],
+    description: string,
+    additionalData?: Record<string, any>
+  ) => {
+    const historyPayload: Omit<TaskHistory, 'id' | 'timestamp'> = {
+      taskId,
+      action,
+      description,
+      userId: currentUser.id,
+      userName: currentUser.name,
+      userEmail: currentUser.email,
+      userRole: currentUser.role,
+    };
+
+    try {
+      if (onAddTaskHistory) {
+        await onAddTaskHistory(taskId, historyPayload);
+        // Refresh history after adding new record
+        if (onFetchTaskHistory) {
+          await fetchAndStoreTaskHistory(taskId);
+        }
+      }
+    } catch (error) {
+      console.error('Error recording history:', error);
+      // Still update local state even if API fails
+      const newHistory: TaskHistory = {
+        id: `temp-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        ...historyPayload
+      };
+
+      setTaskHistory(prev => ({
+        ...prev,
+        [taskId]: [...(prev[taskId] || []), newHistory]
+      }));
+    }
+  }, [currentUser, onAddTaskHistory, onFetchTaskHistory]);
+
+  // ==================== CREATE TASK WITH HISTORY ====================
+  const handleCreateTaskWithHistory = useCallback(async () => {
+    try {
+      // Call the original create task function
+      const newTask = await onCreateTask();
+      
+      if (newTask && typeof newTask === 'object' && newTask.id) {
+        // Add history record for task creation
+        await addHistoryRecord(
+          newTask.id,
+          'task_created',
+          `Task created by ${currentUser.role} (${currentUser.name})`,
+          {
+            taskTitle: newTask.title,
+            assignedTo: getEmailByIdInternal(newTask.assignedTo),
+            dueDate: newTask.dueDate,
+            priority: newTask.priority,
+            createdAt: new Date().toISOString()
+          }
+        );
+        
+        toast.success('✅ Task created successfully!');
+      }
+    } catch (error) {
+      console.error('Error creating task:', error);
+      toast.error('Failed to create task');
+    }
+  }, [onCreateTask, addHistoryRecord, currentUser, getEmailByIdInternal]);
+
+  const trackFieldChange = useCallback((originalTask: Task, updatedTask: Partial<Task>) => {
+    const changes: string[] = [];
+
+    if (updatedTask.title !== undefined && updatedTask.title !== originalTask.title) {
+      changes.push(`Title changed from "${originalTask.title}" to "${updatedTask.title}"`);
+    }
+
+    if (updatedTask.description !== undefined && updatedTask.description !== originalTask.description) {
+      changes.push('Description updated');
+    }
+
+    if (updatedTask.assignedTo !== undefined && updatedTask.assignedTo !== originalTask.assignedTo) {
+      const oldAssignee = getEmailByIdInternal(originalTask.assignedTo);
+      const newAssignee = getEmailByIdInternal(updatedTask.assignedTo);
+      changes.push(`Assignee changed from ${oldAssignee} to ${newAssignee}`);
+    }
+
+    if (updatedTask.dueDate !== undefined && updatedTask.dueDate !== originalTask.dueDate) {
+      const oldDate = new Date(originalTask.dueDate).toLocaleDateString();
+      const newDate = new Date(updatedTask.dueDate).toLocaleDateString();
+      changes.push(`Due date changed from ${oldDate} to ${newDate}`);
+    }
+
+    if (updatedTask.priority !== undefined && updatedTask.priority !== originalTask.priority) {
+      changes.push(`Priority changed from ${originalTask.priority} to ${updatedTask.priority}`);
+    }
+
+    if (updatedTask.type !== undefined && updatedTask.type !== originalTask.type) {
+      changes.push(`Type changed from ${originalTask.type} to ${updatedTask.type}`);
+    }
+
+    if (updatedTask.company !== undefined && updatedTask.company !== originalTask.company) {
+      changes.push(`Company changed from ${originalTask.company} to ${updatedTask.company}`);
+    }
+
+    if (updatedTask.brand !== undefined && updatedTask.brand !== originalTask.brand) {
+      changes.push(`Brand changed from ${originalTask.brand} to ${updatedTask.brand}`);
+    }
+
+    return changes;
+  }, [getEmailByIdInternal]);
+
+  const fetchAndStoreTaskHistory = useCallback(async (taskId: string) => {
+    if (!onFetchTaskHistory) return;
+
+    setLoadingHistory(prev => ({
+      ...prev,
+      [taskId]: true
+    }));
+
+    try {
+      const history = await onFetchTaskHistory(taskId);
+      setTaskHistory(prev => ({
+        ...prev,
+        [taskId]: history
+      }));
+    } catch (error) {
+      console.error('Error fetching history:', error);
+      toast.error('Failed to load task history');
+    } finally {
+      setLoadingHistory(prev => ({
+        ...prev,
+        [taskId]: false
+      }));
+    }
+  }, [onFetchTaskHistory]);
+
+  // ==================== EDIT TASK FUNCTIONS ====================
+  const handleOpenEditModal = useCallback((task: Task) => {
+    setEditingTask(task);
+    setEditChanges(null);
+
+    // Get user email for assignedTo field
+    const assignedToEmail = getEmailByIdInternal(task.assignedTo);
+
+    setEditFormData({
+      title: task.title || '',
+      description: task.description || '',
+      assignedTo: assignedToEmail || '',
+      dueDate: task.dueDate || new Date().toISOString().split('T')[0],
+      priority: (task.priority as TaskFormData['priority']) || 'medium',
+      taskType: task.type || '',
+      company: task.company || '',
+      brand: task.brand || ''
+    });
+
+    setShowEditModal(true);
+    setOpenMenuId(null);
+  }, [getEmailByIdInternal]);
+
+  const handleEditFormChange = useCallback((field: keyof TaskFormData, value: string) => {
+    setEditFormData(prev => {
+      const newData = {
+        ...prev,
+        [field]: value
+      };
+      return newData;
+    });
+
+    // Track changes
+    if (editingTask) {
+      const updatedTask: Partial<Task> = {
+        ...editChanges,
+        [field === 'assignedTo' ? 'assignedTo' : field]: value
+      };
+
+      // Store changes for history tracking
+      setEditChanges(updatedTask);
+    }
+
+    // If company changes, reset brand
+    if (field === 'company') {
+      setEditFormData(prev => ({
+        ...prev,
+        company: value,
+        brand: ''
+      }));
+    }
+  }, [editingTask, editChanges]);
+
+  const handleEditSubmit = useCallback(async () => {
+    if (!editingTask || !onEditTask) {
+      toast.error('Edit functionality not available');
+      return;
+    }
+
+    if (!editFormData.title.trim() || !editFormData.assignedTo.trim() || !editFormData.dueDate) {
+      toast.error('Please fill all required fields');
+      return;
+    }
+
+    setEditLoading(true);
+
+    try {
+      const updatedTaskData: Partial<Task> = {
+        title: editFormData.title,
+        description: editFormData.description,
+        assignedTo: editFormData.assignedTo,
+        dueDate: editFormData.dueDate,
+        priority: editFormData.priority,
+        type: editFormData.taskType,
+        company: editFormData.company,
+        brand: editFormData.brand,
+        updatedAt: new Date().toISOString()
+      };
+
+      // Track changes for history
+      const changes = trackFieldChange(editingTask, updatedTaskData);
+
+      const updatedTask = await onEditTask(editingTask.id, updatedTaskData);
+
+      if (updatedTask) {
+        // Add detailed history record for each change
+        if (changes.length > 0) {
+          const changeDescription = changes.join(', ');
+          await addHistoryRecord(
+            editingTask.id,
+            'task_edited',
+            `Task edited by ${currentUser.role} (${currentUser.name}): ${changeDescription}`,
+            { changes }
+          );
+        } else {
+          await addHistoryRecord(
+            editingTask.id,
+            'task_edited',
+            `Task edited by ${currentUser.role} (${currentUser.name}) - No significant changes detected`
+          );
+        }
+
+        toast.success('✅ Task updated successfully!');
+        setShowEditModal(false);
+        setEditChanges(null);
+      }
+    } catch (error: any) {
+      console.error('Error editing task:', error);
+      toast.error(`Failed to update task: ${error.message || 'Unknown error'}`);
+    } finally {
+      setEditLoading(false);
+    }
+  }, [editingTask, editFormData, editChanges, onEditTask, trackFieldChange, addHistoryRecord, currentUser]);
 
   // ==================== BULK IMPORT FUNCTIONS ====================
   const handleOpenBulkImporter = useCallback(() => {
@@ -2211,7 +3080,8 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
     // Set current user as default assignee
     setBulkImportDefaults(prev => ({
       ...prev,
-      assignedTo: currentUser.email || ''
+      assignedTo: currentUser.email || '',
+      dueDate: new Date().toISOString().split('T')[0]
     }));
   }, [currentUser]);
 
@@ -2263,11 +3133,49 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
       setBulkCreateSummary(result);
 
       if (result.failures.length === 0) {
-        toast.success(`Successfully created ${result.created.length} tasks`);
+        toast.success(`✅ Successfully created ${result.created.length} tasks`);
+
+        // Add history for each created task
+        for (const task of result.created) {
+          try {
+            await addHistoryRecord(
+              task.id,
+              'task_created',
+              `Task created in bulk import by ${currentUser.role} (${currentUser.name})`,
+              {
+                bulkImport: true,
+                createdBy: currentUser.email,
+                createdAt: new Date().toISOString()
+              }
+            );
+          } catch (error) {
+            console.error('Error adding history for bulk task:', error);
+          }
+        }
+
         setShowBulkImporter(false);
         setBulkDraftTasks([]);
       } else {
-        toast.success(`Created ${result.created.length} tasks, ${result.failures.length} failed`);
+        toast.success(`✅ Created ${result.created.length} tasks, ${result.failures.length} failed`);
+
+        // Add history for successfully created tasks
+        for (const task of result.created) {
+          try {
+            await addHistoryRecord(
+              task.id,
+              'task_created',
+              `Task created in bulk import by ${currentUser.role} (${currentUser.name})`,
+              {
+                bulkImport: true,
+                createdBy: currentUser.email,
+                createdAt: new Date().toISOString()
+              }
+            );
+          } catch (error) {
+            console.error('Error adding history for bulk task:', error);
+          }
+        }
+
         // Keep only failed tasks in drafts for retry
         const failedDrafts = validatedDrafts.filter(draft =>
           result.failures.some(failure => failure.rowNumber === draft.rowNumber)
@@ -2276,11 +3184,11 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
       }
     } catch (error: any) {
       console.error('Bulk import error:', error);
-      toast.error(`Failed to create tasks: ${error.message || 'Unknown error'}`);
+      toast.error(`❌ Failed to create tasks: ${error.message || 'Unknown error'}`);
     } finally {
       setBulkSubmitting(false);
     }
-  }, [bulkDraftTasks, bulkImportDefaults, onBulkCreateTasks]);
+  }, [bulkDraftTasks, bulkImportDefaults, onBulkCreateTasks, addHistoryRecord, currentUser]);
 
   // ==================== EVENT HANDLERS ====================
   const handleFilterChange = useCallback((filterType: keyof AdvancedFilters, value: string) => {
@@ -2312,9 +3220,7 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
     }
 
     if (advancedFilters.priority !== 'all') {
-      setPriorityFilter(advancedFilters.priority);
-    } else {
-      setPriorityFilter('all');
+      // Handle priority filter if needed
     }
 
     if (advancedFilters.assigned !== 'all') {
@@ -2346,67 +3252,13 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
 
     setAvailableBrands([]);
     setFilter('all');
-    setPriorityFilter('all');
-    setCategoryFilter('all');
     setDateFilter('all');
-    setTagFilter('all');
-    setCreatedDateFilter('all');
-    setProjectFilter('all');
-    setAssignedFilter?.('all');
+    if (setAssignedFilter) setAssignedFilter('all');
     setSearchTerm('');
 
     setShowAdvancedFilters(false);
     toast.success('All filters cleared');
   }, [setFilter, setAssignedFilter, setDateFilter, setSearchTerm]);
-
-  const fetchAndStoreTaskHistory = useCallback(async (taskId: string) => {
-    if (!onFetchTaskHistory) return;
-
-    setLoadingHistory(prev => ({
-      ...prev,
-      [taskId]: true
-    }));
-
-    try {
-      const history = await onFetchTaskHistory(taskId);
-      setTaskHistory(prev => ({
-        ...prev,
-        [taskId]: history
-      }));
-    } catch (error) {
-      console.error('Error fetching history:', error);
-      toast.error('Failed to load task history');
-    } finally {
-      setLoadingHistory(prev => ({
-        ...prev,
-        [taskId]: false
-      }));
-    }
-  }, [onFetchTaskHistory]);
-
-  const addHistoryRecord = useCallback(async (taskId: string, action: TaskHistory['action'], description: string) => {
-    const historyPayload: Omit<TaskHistory, 'id' | 'timestamp'> = {
-      taskId,
-      action,
-      description,
-      userId: currentUser.id,
-      userName: currentUser.name,
-      userEmail: currentUser.email,
-      userRole: currentUser.role
-    };
-
-    try {
-      if (onAddTaskHistory) {
-        await onAddTaskHistory(taskId, historyPayload);
-      }
-    } catch (error) {
-      console.error('Error recording history:', error);
-    } finally {
-      if (onFetchTaskHistory) {
-        await fetchAndStoreTaskHistory(taskId);
-      }
-    }
-  }, [currentUser, onAddTaskHistory, onFetchTaskHistory, fetchAndStoreTaskHistory]);
 
   const handleSelectTask = useCallback((taskId: string) => {
     setSelectedTasks(prev => (
@@ -2433,7 +3285,8 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
           await addHistoryRecord(
             taskId,
             `bulk_${status}`,
-            `Task marked as ${status.toUpperCase()} in bulk operation by ${currentUser.role} on ${new Date().toLocaleString()}`
+            `Task marked as ${status.toUpperCase()} in bulk operation by ${currentUser.role} on ${new Date().toLocaleString()}`,
+            { bulkOperation: true, affectedTasks: selectedTasks.length }
           );
         }
       }
@@ -2461,7 +3314,8 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
           await addHistoryRecord(
             taskId,
             'task_deleted',
-            `Task DELETED by ${currentUser.role} on ${new Date().toLocaleString()}`
+            `Task deleted by ${currentUser.role} (${currentUser.name})`,
+            { deletedAt: new Date().toISOString(), deletedBy: currentUser.email }
           );
         }
         await onDeleteTask(taskId);
@@ -2488,6 +3342,11 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
       return;
     }
 
+    if (!isTaskCompleted(taskId)) {
+      toast.error("Task must be completed first before permanent approval");
+      return;
+    }
+
     setUpdatingApproval(prev => [...prev, taskId]);
 
     try {
@@ -2502,14 +3361,16 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
         await addHistoryRecord(
           taskId,
           'assigner_permanent_approved',
-          `Task PERMANENTLY approved by Assigner (${currentUser.name}) on ${new Date().toLocaleString()}`
+          `Task PERMANENTLY approved by Assigner (${currentUser.name})`,
+          { permanentApproval: true, approvedAt: new Date().toISOString() }
         );
         toast.success("✅ Task PERMANENTLY approved!");
       } else {
         await addHistoryRecord(
           taskId,
           'permanent_approval_removed',
-          `Permanent approval REMOVED by Assigner (${currentUser.name}) on ${new Date().toLocaleString()}`
+          `Permanent approval REMOVED by Assigner (${currentUser.name})`,
+          { permanentApproval: false, removedAt: new Date().toISOString() }
         );
         toast.success("🔄 Permanent approval removed!");
       }
@@ -2521,7 +3382,7 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
     } finally {
       setUpdatingApproval(prev => prev.filter(id => id !== taskId));
     }
-  }, [tasks, isTaskAssigner, onUpdateTaskApproval, addHistoryRecord, currentUser]);
+  }, [tasks, isTaskAssigner, isTaskCompleted, onUpdateTaskApproval, addHistoryRecord, currentUser]);
 
   const handleToggleTaskStatus = useCallback(async (taskId: string, originalTask: Task) => {
     const isPermanentlyApproved = isTaskPermanentlyApproved(taskId);
@@ -2547,7 +3408,12 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
         await addHistoryRecord(
           taskId,
           'marked_pending',
-          `Task marked as PENDING by ${isAssigner ? 'Assigner' : 'Assignee'} on ${new Date().toLocaleString()}`
+          `Task marked as PENDING by ${isAssigner ? 'Assigner' : 'Assignee'} (${currentUser.name})`,
+          {
+            previousStatus: 'completed',
+            newStatus: 'pending',
+            changedBy: currentUser.role
+          }
         );
 
         toast.success('Task marked as pending');
@@ -2557,7 +3423,13 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
         await addHistoryRecord(
           taskId,
           'marked_completed',
-          `Task marked as COMPLETED by ${isAssigner ? 'Assigner' : 'Assignee'} on ${new Date().toLocaleString()} - Waiting for admin approval`
+          `Task marked as COMPLETED by ${isAssigner ? 'Assigner' : 'Assignee'} (${currentUser.name})`,
+          {
+            previousStatus: 'pending',
+            newStatus: 'completed',
+            changedBy: currentUser.role,
+            needsAdminApproval: !isAssigner
+          }
         );
 
         toast.success('✅ Task marked as completed! Waiting for admin approval.');
@@ -2568,20 +3440,7 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
     } finally {
       setTogglingStatusTasks(prev => prev.filter(id => id !== taskId));
     }
-  }, [isTaskPermanentlyApproved, isTaskAssignee, isTaskAssigner, tasks, isTaskCompleted, onToggleTaskStatus, addHistoryRecord]);
-
-  const handleEditTask = useCallback(async (task: Task) => {
-    try {
-      await onEditTask(task);
-      await addHistoryRecord(
-        task.id,
-        'task_edited',
-        `Task EDITED by ${currentUser.role} on ${new Date().toLocaleString()}`
-      );
-    } catch (error) {
-      console.error('Error editing task:', error);
-    }
-  }, [onEditTask, addHistoryRecord, currentUser]);
+  }, [isTaskPermanentlyApproved, isTaskAssignee, isTaskAssigner, tasks, isTaskCompleted, onToggleTaskStatus, addHistoryRecord, currentUser]);
 
   const handleDeleteTask = useCallback(async (taskId: string) => {
     if (!window.confirm('Are you sure you want to delete this task? This action cannot be undone.')) {
@@ -2595,7 +3454,12 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
       await addHistoryRecord(
         taskId,
         'task_deleted',
-        `Task DELETED by ${currentUser.role} on ${new Date().toLocaleString()}`
+        `Task deleted by ${currentUser.role} (${currentUser.name})`,
+        {
+          taskTitle: task.title,
+          deletedAt: new Date().toISOString(),
+          deletedBy: currentUser.email
+        }
       );
     } catch (error) {
       console.error('Error adding delete history:', error);
@@ -2614,15 +3478,19 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
     }
   }, [tasks, addHistoryRecord, currentUser, onDeleteTask]);
 
- // In the handleOpenCommentSidebar function:
-const handleOpenCommentSidebar = useCallback(async (task: Task) => {
+  const handleOpenCommentSidebar = useCallback(async (task: Task) => {
     if (!task || !task.id) {
       toast.error("Invalid task selected");
       return;
     }
-    
+
     setSelectedTask(task);
     setShowCommentSidebar(true);
+
+    // Load task history
+    if (onFetchTaskHistory) {
+      await fetchAndStoreTaskHistory(task.id);
+    }
 
     if (onFetchTaskComments) {
       setLoadingComments(true);
@@ -2639,7 +3507,7 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
         setLoadingComments(false);
       }
     }
-  }, [onFetchTaskComments]);
+  }, [onFetchTaskComments, onFetchTaskHistory, fetchAndStoreTaskHistory]);
 
   const handleCloseCommentSidebar = useCallback(() => {
     setShowCommentSidebar(false);
@@ -2648,8 +3516,6 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
     setCommentLoading(false);
     setDeletingCommentId(null);
   }, []);
-
-  // In the handleSaveComment function, replace the problematic code:
 
   const handleSaveComment = useCallback(async () => {
     if (!selectedTask) {
@@ -2662,7 +3528,6 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
       return;
     }
 
-    // FIX: Check if selectedTask.id exists
     if (!selectedTask.id) {
       toast.error("Task ID not found");
       return;
@@ -2680,7 +3545,6 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
       userRole: currentUser.role
     };
 
-    // FIX: Safer way to update taskComments
     setTaskComments(prev => {
       const taskId = selectedTask.id;
       if (!taskId) return prev;
@@ -2701,6 +3565,17 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
         const savedComment = await onSaveComment(selectedTask.id, commentToSave);
 
         if (savedComment) {
+          // Add history for comment
+          await addHistoryRecord(
+            selectedTask.id,
+            'comment_added',
+            `Comment added by ${currentUser.role} (${currentUser.name})`,
+            {
+              commentId: savedComment.id,
+              commentPreview: savedComment.content.substring(0, 100)
+            }
+          );
+
           setTaskComments(prev => {
             const taskId = selectedTask.id;
             if (!taskId) return prev;
@@ -2752,27 +3627,51 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
       toast.success('💾 Comment saved locally (offline mode)');
       setCommentLoading(false);
     }
-  }, [selectedTask, newComment, currentUser, onSaveComment]);
-  const handleDeleteComment = useCallback(async (commentId: string) => {
-    if (!selectedTask || !onDeleteComment) {
+  }, [selectedTask, newComment, currentUser, onSaveComment, addHistoryRecord]);
+
+  const handleDeleteComment = useCallback(async (taskId: string, commentId: string) => {
+    if (!onDeleteComment) {
+      toast.error("Delete comment functionality not available");
+      return;
+    }
+
+    if (!window.confirm("Are you sure you want to delete this comment? This action cannot be undone.")) {
       return;
     }
 
     setDeletingCommentId(commentId);
+
     try {
-      await onDeleteComment(selectedTask.id, commentId);
-      setTaskComments(prev => ({
-        ...prev,
-        [selectedTask.id]: (prev[selectedTask.id] || []).filter(comment => comment.id !== commentId)
-      }));
-      toast.success('Comment deleted');
-    } catch (error) {
+      await onDeleteComment(taskId, commentId);
+
+      // Remove comment from local state
+      setTaskComments(prev => {
+        const currentComments = prev[taskId] || [];
+        return {
+          ...prev,
+          [taskId]: currentComments.filter(comment => comment.id !== commentId)
+        };
+      });
+
+      // Add history record for comment deletion
+      await addHistoryRecord(
+        taskId,
+        'comment_deleted',
+        `Comment deleted by ${currentUser.role} (${currentUser.name})`,
+        {
+          deletedAt: new Date().toISOString(),
+          deletedBy: currentUser.email
+        }
+      );
+
+      toast.success("Comment deleted successfully");
+    } catch (error: any) {
       console.error('Error deleting comment:', error);
-      toast.error('Failed to delete comment');
+      toast.error(`Failed to delete comment: ${error.message || 'Unknown error'}`);
     } finally {
       setDeletingCommentId(null);
     }
-  }, [selectedTask, onDeleteComment]);
+  }, [onDeleteComment, addHistoryRecord, currentUser]);
 
   const handleOpenApprovalModal = useCallback((task: Task, action: 'approve' | 'reject') => {
     setTaskToApprove(task);
@@ -2783,14 +3682,10 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
   const handleCloseApprovalModal = useCallback(() => {
     setShowApprovalModal(false);
     setTaskToApprove(null);
-    setApprovalAction('approve');
   }, []);
 
   const handleApproveTask = useCallback(async (approve: boolean) => {
-    if (!taskToApprove || !onApproveTask) {
-      toast.error('Unable to process approval');
-      return;
-    }
+    if (!taskToApprove || !onApproveTask) return;
 
     setApprovingTasks(prev => [...prev, taskToApprove.id]);
 
@@ -2801,7 +3696,12 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
         await addHistoryRecord(
           taskToApprove.id,
           'admin_approved',
-          `Task APPROVED by Admin on ${new Date().toLocaleString()}`
+          `Task APPROVED by Admin (${currentUser.name})`,
+          {
+            approvedBy: currentUser.email,
+            approvedAt: new Date().toISOString(),
+            taskStatus: 'completed'
+          }
         );
 
         toast.success('✅ Task approved by Admin!');
@@ -2809,7 +3709,12 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
         await addHistoryRecord(
           taskToApprove.id,
           'rejected_by_admin',
-          `Task completion REJECTED by Admin on ${new Date().toLocaleString()}`
+          `Task completion REJECTED by Admin (${currentUser.name})`,
+          {
+            rejectedBy: currentUser.email,
+            rejectedAt: new Date().toISOString(),
+            taskStatus: 'pending'
+          }
         );
 
         toast.success('❌ Task rejected by Admin');
@@ -2822,7 +3727,7 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
     } finally {
       setApprovingTasks(prev => prev.filter(id => id !== taskToApprove.id));
     }
-  }, [taskToApprove, onApproveTask, addHistoryRecord, handleCloseApprovalModal]);
+  }, [taskToApprove, onApproveTask, addHistoryRecord, currentUser, handleCloseApprovalModal]);
 
   const handleOpenReassignModal = useCallback((task: Task) => {
     setReassignTask(task);
@@ -2831,27 +3736,31 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
 
   const handleCloseReassignModal = useCallback(() => {
     setShowReassignModal(false);
+    setReassignLoading(false);
     setReassignTask(null);
     setNewAssigneeId('');
-    setReassignLoading(false);
   }, []);
 
   const handleReassignTask = useCallback(async () => {
     if (!reassignTask || !newAssigneeId || !onReassignTask) return;
 
     setReassignLoading(true);
+
     try {
       await onReassignTask(reassignTask.id, newAssigneeId);
-
-      const newAssignee = users.find(u => u.id === newAssigneeId);
 
       await addHistoryRecord(
         reassignTask.id,
         'task_reassigned',
-        `Task REASSIGNED from ${getEmailByIdInternal(reassignTask.assignedTo)} to ${newAssignee?.email || newAssigneeId} by ${currentUser.role} on ${new Date().toLocaleString()}`
+        `Task reassigned by ${currentUser.role} (${currentUser.name})`,
+        {
+          previousAssignee: getEmailByIdInternal(reassignTask.assignedTo),
+          newAssignee: getEmailByIdInternal(newAssigneeId),
+          reassignedAt: new Date().toISOString()
+        }
       );
 
-      toast.success('Task reassigned successfully');
+      toast.success('✅ Task reassigned successfully!');
       handleCloseReassignModal();
     } catch (error) {
       console.error('Error reassigning task:', error);
@@ -2859,35 +3768,41 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
     } finally {
       setReassignLoading(false);
     }
-  }, [reassignTask, newAssigneeId, onReassignTask, users, addHistoryRecord, getEmailByIdInternal, currentUser, handleCloseReassignModal]);
+  }, [reassignTask, newAssigneeId, onReassignTask, addHistoryRecord, currentUser, getEmailByIdInternal, handleCloseReassignModal]);
+
+  const handleOpenHistoryModal = useCallback(async (task: Task) => {
+    setHistoryTask(task);
+    setShowHistoryModal(true);
+
+    // Load task history
+    if (onFetchTaskHistory) {
+      await fetchAndStoreTaskHistory(task.id);
+    }
+  }, [onFetchTaskHistory, fetchAndStoreTaskHistory]);
+
+  const handleCloseHistoryModal = useCallback(() => {
+    setShowHistoryModal(false);
+    setHistoryTask(null);
+  }, []);
 
   // ==================== FILTERED TASKS ====================
   const filteredTasks = useMemo(() => {
     const tasksWithDemoData = tasks.map(task => getTaskWithDemoData(task));
 
-    let filtered = tasksWithDemoData.filter(task => {
+    let filtered = tasksWithDemoData.filter((task: Task) => {
       const isCompleted = isTaskCompleted(task.id);
 
-      // 🔥 CRITICAL FIX: BY DEFAULT, SHOW BOTH TASKS ASSIGNED TO YOU AND BY YOU
-      // If no specific assigned filter is set, default to showing both
-      const shouldShowMyTasks = assignedFilter === 'all' || assignedFilter === '';
-
-      if (shouldShowMyTasks) {
-        // Show tasks assigned to me OR assigned by me
-        if (!isTaskAssignee(task) && !isTaskAssigner(task)) {
+      // 🔥 CRITICAL FIX: Handle assigned filter correctly
+      if (assignedFilter && assignedFilter !== 'all') {
+        if (assignedFilter === 'assigned-to-me' && !isTaskAssignee(task)) {
+          return false;
+        }
+        if (assignedFilter === 'assigned-by-me' && !isTaskAssigner(task)) {
           return false;
         }
       }
 
-      // Apply specific assigned filters
-      if (assignedFilter === 'assigned-to-me' && !isTaskAssignee(task)) {
-        return false;
-      }
-      if (assignedFilter === 'assigned-by-me' && !isTaskAssigner(task)) {
-        return false;
-      }
-
-      // Apply advanced filters for assigned
+      // Apply advanced filters for assigned if set
       if (advancedFilters.assigned !== 'all') {
         if (advancedFilters.assigned === 'assigned-to-me' && !isTaskAssignee(task)) return false;
         if (advancedFilters.assigned === 'assigned-by-me' && !isTaskAssigner(task)) return false;
@@ -2948,7 +3863,10 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
         weekFromNow.setDate(weekFromNow.getDate() + 7);
         if (taskDate > weekFromNow || taskDate < today) return false;
       }
-      if (dateFilterToUse === 'overdue' && !isOverdue(task.dueDate, task.status)) return false;
+      if (dateFilterToUse === 'overdue') {
+        const isTaskOverdue = isOverdue(task.dueDate, task.status);
+        if (!isTaskOverdue) return false;
+      }
 
       // Search Filter
       if (searchTerm) {
@@ -2972,47 +3890,9 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
 
     // Sorting
     filtered.sort((a, b) => {
-      let aValue: any, bValue: any;
-
-      switch (sortBy) {
-        case 'title':
-          aValue = a.title?.toLowerCase() || '';
-          bValue = b.title?.toLowerCase() || '';
-          break;
-        case 'dueDate':
-          aValue = new Date(a.dueDate).getTime();
-          bValue = new Date(b.dueDate).getTime();
-          break;
-        case 'status':
-          aValue = isTaskCompleted(a.id) ? 1 : 0;
-          bValue = isTaskCompleted(b.id) ? 1 : 0;
-          break;
-        case 'priority':
-          aValue = PRIORITY_ORDER[a.priority?.toLowerCase() || ''] || 0;
-          bValue = PRIORITY_ORDER[b.priority?.toLowerCase() || ''] || 0;
-          break;
-        case 'createdAt':
-          aValue = new Date(a.createdAt).getTime();
-          bValue = new Date(b.createdAt).getTime();
-          break;
-        case 'updatedAt':
-          aValue = new Date(a.updatedAt || a.createdAt).getTime();
-          bValue = new Date(b.updatedAt || b.createdAt).getTime();
-          break;
-        case 'assignee':
-          aValue = getEmailByIdInternal(a.assignedTo)?.toLowerCase() || '';
-          bValue = getEmailByIdInternal(b.assignedTo)?.toLowerCase() || '';
-          break;
-        default:
-          aValue = new Date(a.dueDate).getTime();
-          bValue = new Date(b.dueDate).getTime();
-      }
-
-      if (sortOrder === 'asc') {
-        return aValue > bValue ? 1 : -1;
-      } else {
-        return aValue < bValue ? 1 : -1;
-      }
+      const aValue = new Date(a.dueDate).getTime();
+      const bValue = new Date(b.dueDate).getTime();
+      return aValue > bValue ? 1 : -1;
     });
 
     return filtered;
@@ -3022,8 +3902,6 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
     dateFilter,
     assignedFilter,
     searchTerm,
-    sortBy,
-    sortOrder,
     advancedFilters,
     isTaskCompleted,
     isTaskAssignee,
@@ -3075,7 +3953,7 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
               </button>
 
               <button
-                onClick={onCreateTask}
+                onClick={handleCreateTaskWithHistory}
                 className="inline-flex items-center px-4 py-2 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
               >
                 <Plus className="h-4 w-4 mr-2" />
@@ -3126,7 +4004,7 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
                 Bulk Import Tasks
               </button>
               <button
-                onClick={onCreateTask}
+                onClick={handleCreateTaskWithHistory}
                 className="inline-flex items-center px-4 py-2 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
               >
                 <Plus className="h-4 w-4 mr-2" />
@@ -3142,7 +4020,7 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
               <div className="col-span-2">Assigned To</div>
               <div className="col-span-2">Due Date</div>
               <div className="col-span-2">Status</div>
-              <div className="col-span-1">Actions</div>
+              <div className="col-span-2">Actions</div>
             </div>
 
             {/* Task List */}
@@ -3151,7 +4029,6 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
               const isDeleting = deletingTasks.includes(task.id);
               const isApproving = approvingTasks.includes(task.id);
               const isUpdatingApproval = updatingApproval.includes(task.id);
-              const isSelected = selectedTasks.includes(task.id);
 
               return (
                 <div key={task.id}>
@@ -3159,14 +4036,12 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
                   <div className="md:hidden">
                     <MobileTaskItem
                       task={task}
-                      isSelected={isSelected}
                       isToggling={isToggling}
                       isDeleting={isDeleting}
                       isApproving={isApproving}
                       isUpdatingApproval={isUpdatingApproval}
                       openMenuId={openMenuId}
                       currentUser={currentUser}
-                      users={users}
                       formatDate={formatDate}
                       isOverdue={isOverdue}
                       getTaskBorderColor={getTaskBorderColor}
@@ -3174,10 +4049,8 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
                       getStatusBadgeColor={getStatusBadgeColor}
                       getStatusText={getStatusText}
                       getUserInfoForDisplay={getUserInfoForDisplay}
-                      getCommentCount={getCommentCount}
-                      onSelectTask={handleSelectTask}
                       onToggleStatus={handleToggleTaskStatus}
-                      onEditTask={handleEditTask}
+                      onEditTaskClick={handleOpenEditModal}
                       onOpenCommentSidebar={handleOpenCommentSidebar}
                       onOpenReassignModal={handleOpenReassignModal}
                       onPermanentApproval={handlePermanentApproval}
@@ -3189,6 +4062,7 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
                       isTaskCompleted={isTaskCompleted}
                       isTaskPermanentlyApproved={isTaskPermanentlyApproved}
                       isTaskPendingApproval={isTaskPendingApproval}
+                      onOpenHistoryModal={handleOpenHistoryModal}
                     />
                   </div>
 
@@ -3196,36 +4070,23 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
                   <div className="hidden md:block">
                     <DesktopTaskItem
                       task={task}
-                      isSelected={isSelected}
                       isToggling={isToggling}
-                      isDeleting={isDeleting}
-                      isApproving={isApproving}
-                      isUpdatingApproval={isUpdatingApproval}
-                      openMenuId={openMenuId}
                       currentUser={currentUser}
-                      users={users}
                       formatDate={formatDate}
                       isOverdue={isOverdue}
                       getTaskBorderColor={getTaskBorderColor}
                       getTaskStatusIcon={getTaskStatusIcon}
-                      getStatusBadgeColor={getStatusBadgeColor}
-                      getStatusText={getStatusText}
                       getUserInfoForDisplay={getUserInfoForDisplay}
-                      getCommentCount={getCommentCount}
-                      onSelectTask={handleSelectTask}
                       onToggleStatus={handleToggleTaskStatus}
-                      onEditTask={handleEditTask}
+                      onEditTaskClick={handleOpenEditModal}
                       onOpenCommentSidebar={handleOpenCommentSidebar}
-                      onOpenReassignModal={handleOpenReassignModal}
-                      onPermanentApproval={handlePermanentApproval}
-                      onOpenApprovalModal={handleOpenApprovalModal}
-                      onDeleteTask={handleDeleteTask}
-                      onSetOpenMenuId={setOpenMenuId}
-                      isTaskAssignee={isTaskAssignee}
-                      isTaskAssigner={isTaskAssigner}
+                      onOpenHistoryModal={handleOpenHistoryModal}
                       isTaskCompleted={isTaskCompleted}
                       isTaskPermanentlyApproved={isTaskPermanentlyApproved}
-                      isTaskPendingApproval={isTaskPendingApproval}
+                      isTaskAssignee={isTaskAssignee}
+                      isTaskAssigner={isTaskAssigner}
+                      onPermanentApproval={handlePermanentApproval}
+                      isUpdatingApproval={isUpdatingApproval}
                     />
                   </div>
                 </div>
@@ -3234,6 +4095,18 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
           </div>
         )}
       </div>
+
+      {/* Edit Task Modal */}
+      <EditTaskModal
+        showEditModal={showEditModal}
+        editingTask={editingTask}
+        editFormData={editFormData}
+        editLoading={editLoading}
+        users={users}
+        onClose={() => setShowEditModal(false)}
+        onFormChange={handleEditFormChange}
+        onSubmit={handleEditSubmit}
+      />
 
       {/* Bulk Import Modal */}
       {showBulkImporter && (
@@ -3258,21 +4131,15 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
         commentLoading={commentLoading}
         deletingCommentId={deletingCommentId}
         loadingComments={loadingComments}
-        taskComments={taskComments}
-        taskHistory={taskHistory}
-        loadingHistory={loadingHistory}
-        commentViewMode={commentViewMode}
+        loadingHistory={selectedTask ? loadingHistory[selectedTask.id] : false}
         currentUser={currentUser}
-        users={users}
         formatDate={formatDate}
         isOverdue={isOverdue}
-        formatCommentTime={formatCommentTime}
         onCloseSidebar={handleCloseCommentSidebar}
-        onSetCommentViewMode={setCommentViewMode}
         onSetNewComment={setNewComment}
         onSaveComment={handleSaveComment}
-        onDeleteComment={handleDeleteComment}
-        getTimelineItems={getTimelineItems}
+        onDeleteComment={onDeleteComment ? (commentId: string) => handleDeleteComment(selectedTask?.id || '', commentId) : undefined}
+        getTaskComments={getTaskCommentsInternal}
         getUserInfoForDisplay={getUserInfoForDisplay}
         isTaskCompleted={isTaskCompleted}
         getStatusBadgeColor={getStatusBadgeColor}
@@ -3297,6 +4164,17 @@ const handleOpenCommentSidebar = useCallback(async (task: Task) => {
         onClose={handleCloseReassignModal}
         onAssigneeChange={(e: React.ChangeEvent<HTMLSelectElement>) => setNewAssigneeId(e.target.value)}
         onReassign={handleReassignTask}
+      />
+
+      <TaskHistoryModal
+        showHistoryModal={showHistoryModal}
+        historyTask={historyTask}
+        timelineItems={getTimelineItems(historyTask?.id || '')}
+        loadingHistory={historyTask ? loadingHistory[historyTask.id] : false}
+        loadingComments={loadingComments}
+        currentUser={currentUser}
+        onClose={handleCloseHistoryModal}
+        formatDate={formatDate}
       />
     </div>
   );

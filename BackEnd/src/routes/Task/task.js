@@ -8,6 +8,7 @@ const {
     addTaskComment,
     getTaskComments,
     getTaskHistory,
+    addTaskHistory,
     deleteTaskComment,
 } = require("../../Controller/task.controller");
 const { approve } = require("../../Controller/user.controller");
@@ -26,6 +27,7 @@ router.put('/tasks/:id/approve', authMiddleware, approve)
 router.post('/:taskId/comments', authMiddleware, addTaskComment);
 router.get('/:taskId/comments', authMiddleware, getTaskComments);
 router.get('/:taskId/history', authMiddleware, getTaskHistory);
+router.post('/:taskId/history', authMiddleware, addTaskHistory);
 router.delete('/:taskId/comments/:commentId', authMiddleware, deleteTaskComment);
 
 module.exports = router;

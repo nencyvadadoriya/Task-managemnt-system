@@ -82,6 +82,7 @@ export interface TaskHistory {
   oldStatus?: string;
   newStatus?: string;
   note?: string;
+  additionalData?: Record<string, any>;
 }
 
 export interface CommentType {

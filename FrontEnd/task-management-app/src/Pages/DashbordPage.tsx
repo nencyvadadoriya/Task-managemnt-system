@@ -23,6 +23,7 @@ import {
     Flag,
     Building,
     Tag,
+    Edit,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -56,6 +57,19 @@ interface NewTaskForm {
     brand: string;
 }
 
+interface EditTaskForm {
+    id: string;
+    title: string;
+    description: string;
+    assignedTo: string;
+    dueDate: string;
+    priority: TaskPriority;
+    taskType: string;
+    companyName: string;
+    brand: string;
+    status: TaskStatus;
+}
+
 interface StatMeta {
     name: string;
     value: number;
@@ -83,6 +97,8 @@ const DashboardPage = () => {
     const [tasks, setTasks] = useState<Task[]>([]);
     const [selectedStatFilter, setSelectedStatFilter] = useState<string>('all');
     const [showAddTaskModal, setShowAddTaskModal] = useState(false);
+    const [showEditTaskModal, setShowEditTaskModal] = useState(false);
+    const [editingTask, setEditingTask] = useState<Task | null>(null);
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [showLogout, setShowLogout] = useState(false);
@@ -91,6 +107,7 @@ const DashboardPage = () => {
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [isCreatingTask, setIsCreatingTask] = useState(false);
+    const [isUpdatingTask, setIsUpdatingTask] = useState(false);
     const [currentView, setCurrentView] = useState<'dashboard' | 'all-tasks' | 'calendar' | 'team'>('dashboard');
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
@@ -112,7 +129,21 @@ const DashboardPage = () => {
         brand: '',
     });
 
+    const [editFormData, setEditFormData] = useState<EditTaskForm>({
+        id: '',
+        title: '',
+        description: '',
+        assignedTo: '',
+        dueDate: '',
+        priority: 'medium',
+        taskType: 'regular',
+        companyName: 'company name',
+        brand: '',
+        status: 'pending'
+    });
+
     const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+    const [editFormErrors, setEditFormErrors] = useState<Record<string, string>>({});
 
     const [filters, setFilters] = useState<FilterState>({
         status: 'all',
@@ -187,6 +218,7 @@ const DashboardPage = () => {
         },
         [currentUser],
     );
+
     const canMarkTaskDone = useCallback(
         (task: Task) => {
             // If task is permanently approved, no one can change it
@@ -197,6 +229,7 @@ const DashboardPage = () => {
         },
         [currentUser],
     );
+
     const getAssignedUserInfo = useCallback(
         (task: Task): { name: string; email: string } => {
             if (task.assignedToUser?.email) {
@@ -284,6 +317,12 @@ const DashboardPage = () => {
         const company = newTask.companyName;
         return companyBrands[company as keyof typeof companyBrands] || [];
     }, [newTask.companyName, companyBrands]);
+
+    // ✅ ADD THIS FUNCTION - Get available brands for edit form
+    const getEditFormAvailableBrands = useCallback(() => {
+        const company = editFormData.companyName;
+        return companyBrands[company as keyof typeof companyBrands] || [];
+    }, [editFormData.companyName, companyBrands]);
 
     // ✅ FIXED: Handle Save Comment with proper error handling
     const handleSaveComment = useCallback(async (taskId: string, comment: string): Promise<CommentType | null> => {
@@ -488,6 +527,7 @@ const DashboardPage = () => {
             }
 
             // Only admin can approve
+            // Your existing approve logic here
         } catch (error) {
             console.error('Error in approval:', error);
             toast.error('Failed to process approval');
@@ -842,6 +882,30 @@ const DashboardPage = () => {
         }
     }, [formErrors]);
 
+    const handleEditInputChange = useCallback((field: keyof EditTaskForm, value: string) => {
+        setEditFormData(prev => ({
+            ...prev,
+            [field]: value,
+        }));
+
+        // Clear error for this field
+        if (editFormErrors[field]) {
+            setEditFormErrors(prev => {
+                const newErrors = { ...prev };
+                delete newErrors[field];
+                return newErrors;
+            });
+        }
+
+        // Reset brand if company changes
+        if (field === 'companyName') {
+            setEditFormData(prev => ({
+                ...prev,
+                brand: '',
+            }));
+        }
+    }, [editFormErrors]);
+
     const validateForm = useCallback(() => {
         const errors: Record<string, string> = {};
 
@@ -853,13 +917,60 @@ const DashboardPage = () => {
         }
         if (!newTask.dueDate) {
             errors.dueDate = 'Due date is required';
-        } else if (new Date(newTask.dueDate) < new Date()) {
-            errors.dueDate = 'Due date cannot be in the past';
+        } else {
+            const selectedDate = new Date(newTask.dueDate);
+            const today = new Date();
+
+            // Set both dates to start of day for accurate comparison
+            selectedDate.setHours(0, 0, 0, 0);
+            today.setHours(0, 0, 0, 0);
+
+            // Only show error if date is YESTERDAY or earlier
+            // Today and future dates are allowed
+            const yesterday = new Date(today);
+            yesterday.setDate(yesterday.getDate() - 1);
+
+            if (selectedDate < yesterday) {
+                errors.dueDate = 'Due date cannot be in the past';
+            }
         }
 
         setFormErrors(errors);
         return Object.keys(errors).length === 0;
     }, [newTask]);
+
+    const validateEditForm = useCallback(() => {
+        const errors: Record<string, string> = {};
+
+        if (!editFormData.title.trim()) {
+            errors.title = 'Title is required';
+        }
+        if (!editFormData.assignedTo) {
+            errors.assignedTo = 'Please assign the task to a user';
+        }
+        if (!editFormData.dueDate) {
+            errors.dueDate = 'Due date is required';
+        } else {
+            const selectedDate = new Date(editFormData.dueDate);
+            const today = new Date();
+
+            // Set both dates to start of day for accurate comparison
+            selectedDate.setHours(0, 0, 0, 0);
+            today.setHours(0, 0, 0, 0);
+
+            // For editing, we can allow past dates if task already existed
+            // But show warning for dates too far in past
+            const oneYearAgo = new Date(today);
+            oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+
+            if (selectedDate < oneYearAgo) {
+                errors.dueDate = 'Due date cannot be more than 1 year in the past';
+            }
+        }
+
+        setEditFormErrors(errors);
+        return Object.keys(errors).length === 0;
+    }, [editFormData]);
 
     const fetchTasks = useCallback(async () => {
         try {
@@ -915,6 +1026,31 @@ const DashboardPage = () => {
         fetchUsers();
     }, [fetchCurrentUser, fetchTasks, fetchUsers]);
 
+    // ✅ ADD THIS: Function to open edit modal with task data
+    const handleOpenEditModal = useCallback((task: Task) => {
+        setEditingTask(task);
+        
+        // Format date for input field (YYYY-MM-DD)
+        const dueDate = task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : '';
+        
+        setEditFormData({
+            id: task.id,
+            title: task.title || '',
+            description: task.description || '',
+            assignedTo: task.assignedTo || '',
+            dueDate: dueDate,
+            priority: task.priority || 'medium',
+            taskType: task.taskType || 'regular',
+            companyName: task.companyName || 'company name',
+            brand: task.brand || '',
+            status: task.status || 'pending'
+        });
+        
+        setEditFormErrors({});
+        setShowEditTaskModal(true);
+        setOpenMenuId(null); // Close any open menus
+    }, []);
+
     const handleSaveTaskFromModal = useCallback(async () => {
         if (!validateForm()) return;
 
@@ -959,6 +1095,130 @@ const DashboardPage = () => {
             setIsCreatingTask(false);
         }
     }, [newTask, currentUser, users, validateForm]);
+
+    // ✅ ADD THIS: Function to save edited task
+    const handleSaveEditedTask = useCallback(async () => {
+        if (!validateEditForm() || !editingTask) return;
+
+        setIsUpdatingTask(true);
+        try {
+            const updateData = {
+                title: editFormData.title,
+                description: editFormData.description,
+                assignedTo: editFormData.assignedTo,
+                dueDate: editFormData.dueDate,
+                priority: editFormData.priority,
+                taskType: editFormData.taskType,
+                companyName: editFormData.companyName,
+                brand: editFormData.brand,
+                status: editFormData.status,
+                // Keep original assigner and other fields
+                assignedBy: editingTask.assignedBy,
+                assignedToUser: users.find(u => u.email === editFormData.assignedTo),
+            };
+
+            const response = await taskService.updateTask(editingTask.id, updateData);
+            if (response.success && response.data) {
+                // Update local state
+                setTasks(prev => prev.map(task =>
+                    task.id === editingTask.id ? response.data as Task : task
+                ));
+                
+                // Close modal and reset
+                setShowEditTaskModal(false);
+                setEditingTask(null);
+                setEditFormData({
+                    id: '',
+                    title: '',
+                    description: '',
+                    assignedTo: '',
+                    dueDate: '',
+                    priority: 'medium',
+                    taskType: 'regular',
+                    companyName: 'company name',
+                    brand: '',
+                    status: 'pending'
+                });
+                
+                toast.success('Task updated successfully!');
+                
+                // Add history
+                await handleAddTaskHistory(editingTask.id, {
+                    taskId: editingTask.id,
+                    action: 'task_updated',
+                    description: `Task updated by ${currentUser.name}`,
+                    userId: currentUser.id,
+                    userName: currentUser.name,
+                    userEmail: currentUser.email,
+                    userRole: currentUser.role,
+                });
+                
+            } else {
+                toast.error(response.message || 'Failed to update task');
+            }
+        } catch (error) {
+            console.error('Failed to update task:', error);
+            toast.error('Failed to update task');
+        } finally {
+            setIsUpdatingTask(false);
+        }
+    }, [editFormData, editingTask, currentUser, users, validateEditForm, handleAddTaskHistory]);
+
+    const handleBulkCreateTasks = useCallback(
+        async (payloads: any[]): Promise<{ created: Task[]; failures: { index: number; rowNumber: number; title: string; reason: string }[] }> => {
+            const created: Task[] = [];
+            const failures: { index: number; rowNumber: number; title: string; reason: string }[] = [];
+
+            for (let index = 0; index < payloads.length; index++) {
+                const payload = payloads[index];
+
+                try {
+                    const taskData = {
+                        title: payload.title,
+                        description: payload.description || '',
+                        assignedTo: payload.assignedTo,
+                        dueDate: payload.dueDate,
+                        priority: payload.priority,
+                        taskType: payload.taskType || 'regular',
+                        companyName: payload.companyName || 'company name',
+                        brand: payload.brand || '',
+                        status: 'pending' as TaskStatus,
+                        assignedBy: currentUser.email,
+                        assignedToUser: users.find(u => u.email === payload.assignedTo),
+                    };
+
+                    const response = await taskService.createTask(taskData);
+
+                    if (response.success && response.data) {
+                        const createdTask = response.data as Task;
+                        created.push(createdTask);
+                    } else {
+                        failures.push({
+                            index,
+                            rowNumber: payload.rowNumber ?? index + 1,
+                            title: payload.title || 'Untitled Task',
+                            reason: response.message || 'Failed to create task',
+                        });
+                    }
+                } catch (error: any) {
+                    console.error('Failed to create task in bulk:', error);
+                    failures.push({
+                        index,
+                        rowNumber: payload.rowNumber ?? index + 1,
+                        title: payload.title || 'Untitled Task',
+                        reason: error.message || 'Unexpected error while creating task',
+                    });
+                }
+            }
+
+            if (created.length > 0) {
+                setTasks(prev => [...prev, ...created]);
+            }
+
+            return { created, failures };
+        },
+        [currentUser.email, users, setTasks]
+    );
 
     const updateTaskInState = useCallback((updatedTask: Task) => {
         setTasks(prev => prev.map(task =>
@@ -1040,28 +1300,71 @@ const DashboardPage = () => {
         }
     }, [tasks, canEditDeleteTask]);
 
-    const handleUpdateTask = useCallback(async (taskId: string, updatedData: Partial<Task>) => {
-        const task = tasks.find(t => t.id === taskId);
-        if (!task) return;
+    const handleUpdateTask = useCallback(async (taskId: string, updatedData: Partial<Task>): Promise<Task | null> => {
+        console.log('Updating task:', taskId, updatedData);
 
+        const task = tasks.find(t => t.id === taskId);
+        if (!task) {
+            console.error('Task not found:', taskId);
+            toast.error('Task not found');
+            return null;
+        }
+
+        // Check permissions
         if (!canEditDeleteTask(task)) {
+            console.error('User not authorized to edit this task');
             toast.error('Only the task creator can edit this task');
-            return;
+            return null;
         }
 
         try {
-            const response = await taskService.updateTask(taskId, updatedData);
+            // Prepare data for API
+            const updatePayload = {
+                ...updatedData,
+                updatedAt: new Date().toISOString()
+            };
 
-            if (!response.success || !response.data) {
+            console.log('Sending update to API:', updatePayload);
+
+            // Call API
+            const response = await taskService.updateTask(taskId, updatePayload);
+
+            if (!response.success) {
+                console.error('API error:', response.message);
                 toast.error(response.message || 'Failed to update task');
-                return;
+                return null;
             }
 
-            updateTaskInState(response.data as Task);
+            if (!response.data) {
+                console.error('No data in response');
+                toast.error('No data received from server');
+                return null;
+            }
+
+            // Get updated task
+            const updatedTask = response.data as Task;
+            console.log('Task updated successfully:', updatedTask);
+
+            // Update local state
+            updateTaskInState(updatedTask);
             toast.success('Task updated successfully');
-        } catch (error) {
-            console.error('Failed to update task:', error);
-            toast.error('Failed to update task');
+
+            return updatedTask;
+
+        } catch (error: any) {
+            console.error('Error updating task:', error);
+
+            let errorMessage = 'Failed to update task';
+            if (error.response?.status === 401) {
+                errorMessage = 'Session expired. Please login again.';
+            } else if (error.response?.status === 403) {
+                errorMessage = 'You do not have permission to edit this task';
+            } else if (error.response?.status === 404) {
+                errorMessage = 'Task not found on server';
+            }
+
+            toast.error(errorMessage);
+            return null;
         }
     }, [tasks, canEditDeleteTask, updateTaskInState]);
 
@@ -1612,11 +1915,11 @@ const DashboardPage = () => {
                                                         <div className="absolute right-5 top-12 mt-2 w-48 bg-white rounded-xl shadow-lg border border-gray-200 py-2 z-10">
                                                             <button
                                                                 onClick={() => {
-                                                                    handleUpdateTask(task.id, task);
-                                                                    setOpenMenuId(null);
+                                                                    handleOpenEditModal(task);
                                                                 }}
-                                                                className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                                                                className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
                                                             >
+                                                                <Edit className="h-4 w-4" />
                                                                 Edit Task
                                                             </button>
                                                             {canEditDeleteTask(task) && (
@@ -1746,9 +2049,10 @@ const DashboardPage = () => {
                                                                         </button>
                                                                         {canEditDeleteTask(task) && (
                                                                             <button
-                                                                                onClick={() => handleUpdateTask(task.id, task)}
-                                                                                className="px-3 py-1.5 text-xs font-medium bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200"
+                                                                                onClick={() => handleOpenEditModal(task)}
+                                                                                className="px-3 py-1.5 text-xs font-medium bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 flex items-center gap-1"
                                                                             >
+                                                                                <Edit className="h-3 w-3" />
                                                                                 Edit
                                                                             </button>
                                                                         )}
@@ -1775,7 +2079,9 @@ const DashboardPage = () => {
                                     setSearchTerm={setSearchTerm}
                                     currentUser={currentUser}
                                     users={users}
-                                    onEditTask={(task) => handleUpdateTask(task.id, task)}
+                                    onEditTask={async (taskId: string, updatedTask: Partial<Task>) => {
+                                        return await handleUpdateTask(taskId, updatedTask);
+                                    }}
                                     onDeleteTask={handleDeleteTask}
                                     getEmailById={getEmailById}
                                     formatDate={formatDate}
@@ -1785,7 +2091,6 @@ const DashboardPage = () => {
                                     setOpenMenuId={setOpenMenuId}
                                     onToggleTaskStatus={handleToggleTaskStatus}
                                     onCreateTask={() => setShowAddTaskModal(true)}
-                                    // ✅ FIXED: All comment functions properly passed
                                     onSaveComment={handleSaveComment}
                                     onDeleteComment={handleDeleteComment}
                                     onFetchTaskComments={handleFetchTaskComments}
@@ -1794,6 +2099,7 @@ const DashboardPage = () => {
                                     onApproveTask={handleApproveTask}
                                     onUpdateTaskApproval={handleUpdateTaskApproval}
                                     onFetchTaskHistory={handleFetchTaskHistory}
+                                    onBulkCreateTasks={handleBulkCreateTasks}
                                 />
                             ) : currentView === 'calendar' ? (
                                 <CalendarView
@@ -2083,6 +2389,259 @@ const DashboardPage = () => {
                                         <span className="flex items-center gap-2">
                                             <PlusCircle className="h-4 w-4" />
                                             Create Task
+                                        </span>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ✅ ADD THIS: Edit Task Modal */}
+            {showEditTaskModal && editingTask && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div
+                        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+                        onClick={() => setShowEditTaskModal(false)}
+                    />
+
+                    <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+                        <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-6 py-5">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-white/20 rounded-xl">
+                                        <Edit className="h-6 w-6 text-white" />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-xl font-semibold text-white">
+                                            Edit Task
+                                        </h3>
+                                        <p className="text-sm text-blue-100 mt-0.5">
+                                            Update task details below
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setShowEditTaskModal(false)}
+                                    className="p-1.5 text-white hover:bg-white/20 rounded-lg"
+                                >
+                                    <X className="h-5 w-5" />
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="px-6 py-6 overflow-y-auto flex-1">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {/* Left Column */}
+                                <div className="space-y-6">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-900 mb-2">
+                                            Task Title *
+                                        </label>
+                                        <input
+                                            type="text"
+                                            placeholder="What needs to be done?"
+                                            className={`w-full px-4 py-3 text-sm border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.title ? 'border-red-500' : 'border-gray-300'
+                                                }`}
+                                            value={editFormData.title}
+                                            onChange={e => handleEditInputChange('title', e.target.value)}
+                                        />
+                                        {editFormErrors.title && (
+                                            <p className="mt-1 text-sm text-red-600">{editFormErrors.title}</p>
+                                        )}
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-900 mb-2">
+                                            Description
+                                        </label>
+                                        <textarea
+                                            placeholder="Describe the task in detail..."
+                                            className="w-full px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[120px]"
+                                            value={editFormData.description}
+                                            onChange={e => handleEditInputChange('description', e.target.value)}
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-900 mb-2">
+                                            Assign To *
+                                        </label>
+                                        <select
+                                            value={editFormData.assignedTo}
+                                            onChange={e => handleEditInputChange('assignedTo', e.target.value)}
+                                            className={`w-full px-4 py-3 text-sm border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.assignedTo ? 'border-red-500' : 'border-gray-300'
+                                                }`}
+                                        >
+                                            <option value="">Select team member</option>
+                                            {users.map(user => (
+                                                <option key={user.id} value={user.email}>
+                                                    {user.name} ({user.email})
+                                                </option>
+                                            ))}
+                                        </select>
+                                        {editFormErrors.assignedTo && (
+                                            <p className="mt-1 text-sm text-red-600">{editFormErrors.assignedTo}</p>
+                                        )}
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-900 mb-2">
+                                            Status
+                                        </label>
+                                        <select
+                                            value={editFormData.status}
+                                            onChange={e => handleEditInputChange('status', e.target.value as TaskStatus)}
+                                            className="w-full px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        >
+                                            <option value="pending">Pending</option>
+                                            <option value="in-progress">In Progress</option>
+                                            <option value="completed">Completed</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                {/* Right Column */}
+                                <div className="space-y-6">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-900 mb-2">
+                                            Due Date *
+                                        </label>
+                                        <input
+                                            type="date"
+                                            className={`w-full px-4 py-3 text-sm border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.dueDate ? 'border-red-500' : 'border-gray-300'
+                                                }`}
+                                            value={editFormData.dueDate}
+                                            onChange={e => handleEditInputChange('dueDate', e.target.value)}
+                                        />
+                                        {editFormErrors.dueDate && (
+                                            <p className="mt-1 text-sm text-red-600">{editFormErrors.dueDate}</p>
+                                        )}
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-900 mb-2">
+                                                Priority
+                                            </label>
+                                            <div className="grid grid-cols-3 gap-2">
+                                                {['low', 'medium', 'high'].map((priority) => (
+                                                    <button
+                                                        key={priority}
+                                                        type="button"
+                                                        onClick={() => handleEditInputChange('priority', priority as TaskPriority)}
+                                                        className={`py-2.5 text-xs font-medium rounded-lg border ${editFormData.priority === priority
+                                                            ? priority === 'high'
+                                                                ? 'bg-rose-100 text-rose-700 border-rose-300'
+                                                                : priority === 'medium'
+                                                                    ? 'bg-amber-100 text-amber-700 border-amber-300'
+                                                                    : 'bg-blue-100 text-blue-700 border-blue-300'
+                                                            : 'bg-gray-100 text-gray-600 border-gray-300'
+                                                            }`}
+                                                    >
+                                                        {priority.charAt(0).toUpperCase() + priority.slice(1)}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-900 mb-2">
+                                                Task Type
+                                            </label>
+                                            <select
+                                                className="w-full px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                value={editFormData.taskType}
+                                                onChange={e => handleEditInputChange('taskType', e.target.value)}
+                                            >
+                                                <option value="regular">Regular</option>
+                                                <option value="troubleshoot">Troubleshoot</option>
+                                                <option value="maintenance">Maintenance</option>
+                                                <option value="development">Development</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-900 mb-2">
+                                            Company
+                                        </label>
+                                        <div className="grid grid-cols-3 gap-2">
+                                            {['ACS', 'MD Inpex', 'Tech Solutions', 'Global Inc', 'Company'].map((company) => (
+                                                <button
+                                                    key={company}
+                                                    type="button"
+                                                    onClick={() => handleEditInputChange('companyName', company.toLowerCase())}
+                                                    className={`py-2.5 text-xs font-medium rounded-lg border ${editFormData.companyName === company.toLowerCase()
+                                                        ? company === 'ACS'
+                                                            ? 'bg-purple-100 text-purple-700 border-purple-300'
+                                                            : company === 'MD Inpex'
+                                                                ? 'bg-indigo-100 text-indigo-700 border-indigo-300'
+                                                                : company === 'Tech Solutions'
+                                                                    ? 'bg-cyan-100 text-cyan-700 border-cyan-300'
+                                                                    : 'bg-gray-100 text-gray-700 border-gray-300'
+                                                        : 'bg-gray-50 text-gray-600 border-gray-200'
+                                                        }`}
+                                                >
+                                                    {company}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-900 mb-2">
+                                            Brand
+                                        </label>
+                                        <select
+                                            className="w-full px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            value={editFormData.brand}
+                                            onChange={e => handleEditInputChange('brand', e.target.value)}
+                                            disabled={!editFormData.companyName}
+                                        >
+                                            <option value="">Select a brand</option>
+                                            {getEditFormAvailableBrands().map((brand) => (
+                                                <option key={brand} value={brand.toLowerCase()}>
+                                                    {brand}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <p className="mt-1 text-xs text-gray-500">
+                                            Select a company first to see available brands
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="px-6 py-5 bg-gray-50 border-t border-gray-200">
+                            <div className="flex justify-end gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowEditTaskModal(false)}
+                                    className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleSaveEditedTask}
+                                    disabled={isUpdatingTask}
+                                    className={`px-5 py-2.5 text-sm font-medium text-white rounded-xl ${isUpdatingTask
+                                        ? 'bg-blue-400 cursor-not-allowed'
+                                        : 'bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700'
+                                        }`}
+                                >
+                                    {isUpdatingTask ? (
+                                        <span className="flex items-center gap-2">
+                                            <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                                            Updating Task...
+                                        </span>
+                                    ) : (
+                                        <span className="flex items-center gap-2">
+                                            <Edit className="h-4 w-4" />
+                                            Update Task
                                         </span>
                                     )}
                                 </button>
