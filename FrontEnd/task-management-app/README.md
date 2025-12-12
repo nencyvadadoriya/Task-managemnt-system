@@ -1,73 +1,99 @@
-# React + TypeScript + Vite
+# 🚀 TaskFlow - Task Management App
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A comprehensive task management application with drag-and-drop functionality, task categorization, priority settings, and progress tracking. Built with HTML5, CSS3, and Vanilla JavaScript.
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## ✨ Features
 
-## React Compiler
+### 📋 Core Features
+- **Task Creation & Management**: Add, edit, delete, and organize tasks
+- **Drag & Drop Interface**: Intuitive task organization between columns
+- **Task Categories**: Categorize tasks (Work, Personal, Study, Shopping, Health, Other)
+- **Priority Levels**: Set priority (High, Medium, Low) with color coding
+- **Due Dates & Reminders**: Set deadlines with date picker
+- **Progress Tracking**: Visual progress indicators for tasks
+- **Search & Filter**: Quickly find tasks by keyword, category, or status
+- **Task Statistics**: Dashboard with completion statistics
+- **Responsive Design**: Works on desktop, tablet, and mobile devices
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### 🎯 Advanced Features
+- **Local Storage**: Tasks persist between browser sessions
+- **Task Details Modal**: View and edit complete task details
+- **Dark/Light Theme**: Toggle between themes
+- **Task Counter**: Real-time count of tasks in each column
+- **Due Date Warnings**: Color-coded warnings for approaching deadlines
+- **Category Filtering**: Filter tasks by category
+- **Priority Sorting**: Sort tasks by priority level
+- **Export Tasks**: Export tasks as JSON file
 
-## Expanding the ESLint configuration
+---
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## 🛠️ Technologies Used
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+- **HTML5**: Semantic markup structure
+- **CSS3**: Modern styling with Flexbox/Grid, CSS Variables
+- **JavaScript (ES6+)**: Vanilla JavaScript with DOM manipulation
+- **Drag & Drop API**: Native browser drag and drop
+- **Local Storage API**: Persistent data storage
+- **Font Awesome Icons**: For UI icons
+- **Google Fonts**: Typography
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+---
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+## 📱 How It Works
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### 1. **Adding Tasks**
+   - Click the "Add New Task" button
+   - Fill in task details (title, description, category, priority, due date)
+   - Task appears in the "To Do" column
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### 2. **Managing Tasks**
+   - **Drag & Drop**: Move tasks between columns (To Do → In Progress → Done)
+   - **Edit Task**: Click the edit icon on any task
+   - **Delete Task**: Click the delete icon on any task
+   - **View Details**: Click on task title to see full details
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+### 3. **Organizing Tasks**
+   - Use the filter dropdown to show specific categories
+   - Use search to find tasks by title or description
+   - Sort tasks by priority or due date
+
+### 4. **Tracking Progress**
+   - Visual progress bar shows overall completion
+   - Statistics panel displays counts for each status
+   - Due dates show warnings when approaching
+
+---
+
+## 🔗 Live Demo
+[🔗 Live App on Render](https://task-managemnt-frontend-app.onrender.com)
+
+---
+
+## 🔗 Social Links
+
+- [💼 LinkedIn](https://www.linkedin.com/in/nency-vadadoriya-3969052ba/)
+- [👨‍💻 GitHub](https://github.com/nencyvadadoriya)
+
+---
+
+## 🪪 License
+
+This project is licensed under the [MIT License](https://github.com/nencyvadadoriya/-License/blob/main/LICENSE).
+
+
+---
+📸 Preview
+<div align="center">
+
+<table>
+  <tr>
+    <td><img src="./public/img1.png" width="500" /></td>
+    <td><img src="./public/img2.png" width="500" /></td>
+  </tr>
+  <tr>
+    <td><img src="./public/img3.png" width="500" /></td>
+    <td><img src="./public/img4.png" width="500" /></td>
+  </tr>
+</table>
