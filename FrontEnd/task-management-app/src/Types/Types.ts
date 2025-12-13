@@ -1,40 +1,40 @@
-export type TaskStatus =  'in-progress' | 'completed' | 'pending' | 'cancelled' | 'on-hold';
+export type TaskStatus = 'in-progress' | 'completed' | 'pending' | 'cancelled' | 'on-hold';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 
 // Types/Types.ts file mein Task interface mein add karein:
 export interface Task {
-  id: string;
-  title: string;
-  description?: string;
-  dueDate: string;
-  status: TaskStatus;
-  priority?: TaskPriority;
-  assignedTo: string | UserType;
-  assignedBy?: string | UserType;
-  createdAt: string;
-  updatedAt?: string;
-  completedApproval?: boolean;
-  history?: TaskHistory[];
-  comments?: CommentType[];
-  
-  category?: string;
-  tags?: string[];
-  type?: string;          // 'regular', 'troubleshoot', 'maintenance', 'development'
-  company?: string;       // 'acs', 'md inpex', 'tech solutions', 'global inc'
-  brand?: string;         // 'chips', 'soy', 'saffola', etc.
-  project?: string;       // Project name
-  assignedToUser?: UserType;
+    id: string;
+    title: string;
+    description?: string;
+    dueDate: string;
+    status: TaskStatus;
+    priority?: TaskPriority;
+    assignedTo: string | UserType;
+    assignedBy?: string | UserType;
+    createdAt: string;
+    updatedAt?: string;
+    completedApproval?: boolean;
+    history?: TaskHistory[];
+    comments?: CommentType[];
 
-  // Extended fields used in multiple UI components
-  taskType?: string;      // e.g. 'regular', 'bug', etc.
-  companyName?: string;   // Friendly company display name
-  completionType?: 'admin' | 'user';
-  completedBy?: string;
+    category?: string;
+    tags?: string[];
+    type?: string;          // 'regular', 'troubleshoot', 'maintenance', 'development'
+    company?: string;       // 'acs', 'md inpex', 'tech solutions', 'global inc'
+    brand?: string;         // 'chips', 'soy', 'saffola', etc.
+    project?: string;       // Project name
+    assignedToUser?: UserType;
+
+    // Extended fields used in multiple UI components
+    taskType?: string;      // e.g. 'regular', 'bug', etc.
+    companyName?: string;   // Friendly company display name
+    completionType?: 'admin' | 'user';
+    completedBy?: string;
 }
 export interface TaskHistory {
-  id: string;
-  taskId: string;
-  action:
+    id: string;
+    taskId: string;
+    action:
     | 'created'
     | 'task_created'
     | 'reassigned'
@@ -71,20 +71,23 @@ export interface TaskHistory {
     | 'status_pending_by_assignee'
     | 'approval_granted'
     | 'approval_revoked'
-    | 'assigner_recheck_requested';
-  userId: string;
-  userName: string;
-  userEmail: string;
-  userRole?: string;
-  oldValue?: string;
-  newValue?: string;
-  description?: string;
-  timestamp: string;
-  oldStatus?: string;
-  newStatus?: string;
-  note?: string;
-  additionalData?: Record<string, any>;
+    | 'assigner_recheck_requested'
+    | 'approval_removed'
+    | 'task_approved';
+    userId: string;
+    userName: string;
+    userEmail: string;
+    userRole?: string;
+    oldValue?: string;
+    newValue?: string;
+    description?: string;
+    timestamp: string;
+    oldStatus?: string;
+    newStatus?: string;
+    note?: string;
+    additionalData?: Record<string, any>;
 }
+
 
 export interface CommentType {
     id: string;
@@ -111,6 +114,11 @@ export interface UserType {
     bio?: string;
     skills?: string[];
     isActive?: boolean;
+    position?: string;
+    lastLogin?: string;
+    createdAt?: string;
+    updatedAt?: string;
+    password?: string;
 
     // Optional avatar / initial used in some views
     avatar?: string;
@@ -147,7 +155,10 @@ export interface RegisterUserBody {
     name: string;
     email: string;
     password: string;
-    role: 'admin' | 'user';
+    role: string;
+    phone?: string;
+    department?: string;
+    position?: string;
 }
 
 export interface OtpverifyPayload {
@@ -163,7 +174,7 @@ export interface NewTaskForm {
     priority: TaskPriority;
     taskType: string;
     companyName: string;
-    brand: string; 
+    brand: string;
 }
 
 export type CompanyFilterValue = 'all' | 'company-a' | 'company-b' | 'company-c' | 'company-d';
@@ -203,7 +214,7 @@ export interface TaskFilterPreset {
 }
 
 export interface SignupBody {
-  name: string;
-  email: string;
-  password: string;
+    name: string;
+    email: string;
+    password: string;
 }

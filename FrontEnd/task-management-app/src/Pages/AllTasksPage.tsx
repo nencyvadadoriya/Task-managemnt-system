@@ -65,6 +65,8 @@ interface AllTasksPageProps {
   onUpdateTaskApproval?: (taskId: string, completedApproval: boolean) => Promise<void>;
   onFetchTaskHistory?: (taskId: string) => Promise<TaskHistory[]>;
   onBulkCreateTasks?: (tasks: BulkTaskPayload[]) => Promise<BulkCreateResult>;
+  // Optional sidebar collapsed state from DashboardPage
+  isSidebarCollapsed?: boolean;
 }
 
 type BulkPriority = 'low' | 'medium' | 'high' | 'urgent';
@@ -2008,45 +2010,6 @@ const CommentSidebar = memo(({
                 </div>
 
                 {/* Comments Section */}
-                <div className="mt-6 pt-6 border-t">
-                  <h4 className="font-medium text-gray-900 mb-3">Comments</h4>
-                  {taskComments && taskComments.length > 0 ? (
-                    <div className="space-y-3 mb-4">
-                      {taskComments.map((comment: CommentType) => (
-                        <div key={comment.id} className="border-l-2 border-blue-400 pl-3 py-2">
-                          <div className="flex justify-between items-start">
-                            <div className="text-xs font-medium text-gray-900">
-                              {comment.userName} ({comment.userRole})
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs text-gray-500">
-                                {formatDateTime(comment.createdAt)}
-                              </span>
-                              {onDeleteComment && comment.userId === currentUser.id && (
-                                <button
-                                  onClick={() => onDeleteComment(selectedTask.id, comment.id)}
-                                  disabled={deletingCommentId === comment.id}
-                                  className="text-xs text-red-600 hover:text-red-800"
-                                >
-                                  {deletingCommentId === comment.id ? (
-                                    <Loader2 className="h-3 w-3 animate-spin" />
-                                  ) : (
-                                    'Delete'
-                                  )}
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                          <p className="text-sm text-gray-700 mt-1">{comment.content}</p>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-4 text-gray-500 text-sm">
-                      No comments yet
-                    </div>
-                  )}
-
                   {/* Add Comment Section */}
                   <div className="mt-4">
                     <h4 className="font-medium text-gray-900 mb-3">Add Comment</h4>
@@ -2084,7 +2047,6 @@ const CommentSidebar = memo(({
                       </div>
                     )}
                   </div>
-                </div>
               </>
             ) : (
               <>

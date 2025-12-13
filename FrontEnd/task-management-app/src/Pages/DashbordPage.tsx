@@ -24,6 +24,7 @@ import {
     Building,
     Tag,
     Edit,
+    User,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -32,6 +33,7 @@ import Navbar from './Navbar';
 import AllTasksPage from './AllTasksPage';
 import CalendarView from './CalendarView';
 import TeamPage from './TeamPage';
+import UserProfilePage from './UserProfilePage';
 
 import type {
     CommentType,
@@ -108,14 +110,28 @@ const DashboardPage = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [isCreatingTask, setIsCreatingTask] = useState(false);
     const [isUpdatingTask, setIsUpdatingTask] = useState(false);
-    const [currentView, setCurrentView] = useState<'dashboard' | 'all-tasks' | 'calendar' | 'team'>('dashboard');
+    const [currentView, setCurrentView] = useState<'dashboard' | 'all-tasks' | 'calendar' | 'team' | 'profile'>('dashboard');
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+
+    // User management state
+    // const [showEditUserModal, setShowEditUserModal] = useState(false);
+    // const [showAddUserModal, setShowAddUserModal] = useState(false);
+    // const [editingUser, setEditingUser] = useState<UserType | null>(null);
+    // const [newUserForm, setNewUserForm] = useState<Partial<UserType>>({ ... });
+
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
     const [currentUser, setCurrentUser] = useState<UserType>({
         id: '',
         name: 'Loading...',
         role: 'user',
         email: '',
+        phone: '',
+        avatar: '',
+        department: '',
+        position: '',
+        joinDate: new Date().toISOString(),
+        lastLogin: new Date().toISOString(),
     });
 
     const [newTask, setNewTask] = useState<NewTaskForm>({
@@ -155,7 +171,22 @@ const DashboardPage = () => {
         brand: 'all',
     });
 
-    // Company to brand mapping
+    const mainContentClasses = useMemo(() => {
+        return `
+            flex-1 flex flex-col
+            transition-all duration-300 ease-in-out
+            ${isSidebarCollapsed ? 'lg:ml-20' : 'lg:ml-64'}
+            min-w-0
+        `;
+    }, [isSidebarCollapsed]);
+
+    const dashboardContainerClasses = useMemo(() => {
+        return `
+            w-full max-w-full mx-auto px-4 sm:px-6 md:px-8
+            transition-all duration-300 ease-in-out
+        `;
+    }, []);
+
     const companyBrands = useMemo(() => ({
         'acs': ['Chips', 'Soy', 'Saffola', 'Lays', 'Pepsi', '7Up'],
         'md inpex': ['Inpex Pro', 'Inpex Lite', 'Inpex Max'],
@@ -186,34 +217,30 @@ const DashboardPage = () => {
         }
     }, []);
 
-    // ✅ ADD THIS FUNCTION - getTaskBorderColor function
     const getTaskBorderColor = useCallback((task: Task): string => {
         const isCompleted = task.status === 'completed' || task.completedApproval;
 
         if (isCompleted) {
             if (task.completedApproval) {
-                return 'border-l-4 border-l-blue-500'; // Permanently approved
+                return 'border-l-4 border-l-blue-500';
             }
-            return 'border-l-4 border-l-green-500'; // Completed
+            return 'border-l-4 border-l-green-500';
         } else if (isOverdue(task.dueDate, task.status)) {
-            return 'border-l-4 border-l-red-500'; // Overdue
+            return 'border-l-4 border-l-red-500';
         } else if (task.priority === 'high') {
-            return 'border-l-4 border-l-orange-500'; // High priority
+            return 'border-l-4 border-l-orange-500';
         } else if (task.priority === 'medium') {
-            return 'border-l-4 border-l-yellow-500'; // Medium priority
+            return 'border-l-4 border-l-yellow-500';
         } else if (task.priority === 'low') {
-            return 'border-l-4 border-l-blue-500'; // Low priority
+            return 'border-l-4 border-l-blue-500';
         } else {
-            return 'border-l-4 border-l-gray-300'; // Default
+            return 'border-l-4 border-l-gray-300';
         }
     }, [isOverdue]);
 
     const canEditDeleteTask = useCallback(
         (task: Task) => {
-            // Admin can edit/delete any task
             if (currentUser?.role === 'admin') return true;
-
-            // Regular users can only edit/delete tasks they assigned
             return currentUser?.email ? task.assignedBy === currentUser.email : false;
         },
         [currentUser],
@@ -221,14 +248,88 @@ const DashboardPage = () => {
 
     const canMarkTaskDone = useCallback(
         (task: Task) => {
-            // If task is permanently approved, no one can change it
             if (task.completedApproval) return false;
-
-            // User can only mark tasks assigned to them as done
             return currentUser?.email ? task.assignedTo === currentUser.email : false;
         },
         [currentUser],
     );
+
+    // User Management Functions
+    const handleUpdateUser = useCallback(async (userId: string, updatedData: Partial<UserType>) => {
+        if (currentUser?.role !== 'admin') {
+            throw new Error('Only administrators can edit users');
+        }
+
+        try {
+            const response = await authService.updateUser(userId, updatedData);
+            if (response.success) {
+                setUsers(prev => prev.map(user => {
+                    const uid = user.id || (user as any)._id;
+                    return uid === userId ? { ...user, ...updatedData } : user;
+                }));
+                return;
+            } else {
+                throw new Error(response.message || 'Failed to update user');
+            }
+        } catch (error: any) {
+            console.error('Error updating user:', error);
+            throw error;
+        }
+    }, [currentUser]);
+
+    const handleCreateUser = useCallback(async (newUser: Partial<UserType>) => {
+        if (currentUser?.role !== 'admin') {
+            throw new Error('Only administrators can create users');
+        }
+
+        try {
+            const payload = {
+                name: newUser.name || '',
+                email: newUser.email || '',
+                password: newUser.password || '',
+                role: (newUser.role as 'admin' | 'user') || 'user',
+                phone: newUser.phone,
+                department: newUser.department,
+                position: newUser.position
+            };
+
+            const response = await authService.createUser(payload);
+
+            if (response.success && response.data) {
+                setUsers(prev => [...prev, response.data as UserType]);
+            } else {
+                throw new Error(response.message || 'Failed to create user');
+            }
+        } catch (error: any) {
+            console.error('Error creating user:', error);
+            throw error;
+        }
+    }, [currentUser]);
+
+    const handleDeleteUser = useCallback(async (userId: string) => {
+        if (currentUser?.role !== 'admin') {
+            throw new Error('Only administrators can delete users');
+        }
+
+        if (userId === currentUser.id) {
+            throw new Error('You cannot delete your own account');
+        }
+
+        try {
+            const response = await authService.deleteUser(userId);
+            // authService.deleteUser returns a response object, check for success
+            const isSuccess = response && (response.success === true || !response.error);
+
+            if (isSuccess) {
+                setUsers(prev => prev.filter(user => (user.id || (user as any)._id) !== userId));
+            } else {
+                throw new Error(response?.message || 'Failed to delete user');
+            }
+        } catch (error: any) {
+            console.error('Error deleting user:', error);
+            throw error;
+        }
+    }, [currentUser]);
 
     const getAssignedUserInfo = useCallback(
         (task: Task): { name: string; email: string } => {
@@ -240,7 +341,6 @@ const DashboardPage = () => {
             }
 
             if (task.assignedTo) {
-                // assignedTo can be string | UserType
                 if (typeof task.assignedTo === 'object') {
                     return {
                         name: task.assignedTo.name || 'User',
@@ -273,7 +373,6 @@ const DashboardPage = () => {
     const getAssignedByInfo = useCallback(
         (task: Task): { name: string; email: string } => {
             if (task.assignedBy) {
-                // assignedBy can be string | UserType
                 if (typeof task.assignedBy === 'object') {
                     return {
                         name: task.assignedBy.name || 'User',
@@ -303,26 +402,19 @@ const DashboardPage = () => {
         [users],
     );
 
-    // ✅ ADD THIS FUNCTION - Get available brands
     const getAvailableBrands = useCallback(() => {
         const company = newTask.companyName;
         return companyBrands[company as keyof typeof companyBrands] || [];
     }, [newTask.companyName, companyBrands]);
 
-    // ✅ ADD THIS FUNCTION - Get available brands for edit form
     const getEditFormAvailableBrands = useCallback(() => {
         const company = editFormData.companyName;
         return companyBrands[company as keyof typeof companyBrands] || [];
     }, [editFormData.companyName, companyBrands]);
 
-    // ✅ FIXED: Handle Save Comment with proper error handling
     const handleSaveComment = useCallback(async (taskId: string, comment: string): Promise<CommentType> => {
         try {
-            console.log('🚀 Saving comment via taskService.addComment...');
-
             const response = await taskService.addComment(taskId, comment);
-
-            console.log('📥 API Response:', response);
 
             if (response.success && response.data) {
                 const commentData = response.data;
@@ -348,7 +440,6 @@ const DashboardPage = () => {
         } catch (error: any) {
             console.error('❌ Error saving comment:', error);
 
-            // Fallback mock comment so caller still gets a CommentType
             const mockComment: CommentType = {
                 id: `mock-${Date.now()}`,
                 taskId: taskId,
@@ -366,14 +457,9 @@ const DashboardPage = () => {
         }
     }, [currentUser]);
 
-    // ✅ FIXED: Handle Delete Comment
     const handleDeleteComment = useCallback(async (taskId: string, commentId: string) => {
         try {
-            console.log('🗑️ Deleting comment:', commentId, 'for task:', taskId);
-
-            // Check if taskService.deleteComment exists
             if (!taskService.deleteComment) {
-                console.log('⚠️ deleteComment method not available, using mock');
                 toast.success('Comment deleted (mock)');
                 return;
             }
@@ -391,27 +477,15 @@ const DashboardPage = () => {
         }
     }, []);
 
-    // ✅ FIXED: Handle Fetch Task Comments
     const handleFetchTaskComments = useCallback(async (taskId: string): Promise<CommentType[]> => {
         try {
-            console.log('📡 Fetching comments for task:', taskId);
-
-            // Check if taskService.fetchComments exists
-            if (!taskService.fetchComments) {
-                console.log('⚠️ fetchComments method not available, returning empty array');
-                return [];
-            }
-
             const response = await taskService.fetchComments(taskId);
 
             if (!response) {
-                console.log('❌ No response from fetchComments');
                 return [];
             }
 
             if (response.success && Array.isArray(response.data)) {
-                console.log(`✅ Found ${response.data.length} comments`);
-
                 return response.data.map((comment: any): CommentType => ({
                     id: comment.id?.toString() || comment._id?.toString() || `${taskId}-${Date.now()}`,
                     taskId: comment.taskId?.toString() || taskId,
@@ -431,7 +505,6 @@ const DashboardPage = () => {
         }
     }, []);
 
-    // ✅ FIXED: Handle Reassign Task
     const handleReassignTask = useCallback(async (taskId: string, newAssigneeId: string) => {
         try {
             const task = tasks.find(t => t.id === taskId);
@@ -440,14 +513,12 @@ const DashboardPage = () => {
                 return;
             }
 
-            // Find new assignee
             const newAssignee = users.find(u => u.id === newAssigneeId);
             if (!newAssignee) {
                 toast.error('User not found');
                 return;
             }
 
-            // Update task with new assignee
             const updatedTask = {
                 ...task,
                 assignedTo: newAssignee.email,
@@ -459,7 +530,6 @@ const DashboardPage = () => {
                 }
             };
 
-            // Update in backend
             const response = await taskService.updateTask(taskId, {
                 assignedTo: newAssignee.email,
                 assignedToUser: {
@@ -471,7 +541,6 @@ const DashboardPage = () => {
             });
 
             if (response.success) {
-                // Update local state
                 setTasks(prev => prev.map(t =>
                     t.id === taskId ? updatedTask : t
                 ));
@@ -485,11 +554,8 @@ const DashboardPage = () => {
         }
     }, [tasks, users]);
 
-    // ✅ FIXED: Handle Add Task History
     const handleAddTaskHistory = useCallback(async (taskId: string, history: Omit<TaskHistory, 'id' | 'timestamp'>) => {
         try {
-            console.log('📝 Recording task history for', taskId, history);
-
             const response = await taskService.updateTask(taskId, {
                 note: history.description,
             });
@@ -506,7 +572,6 @@ const DashboardPage = () => {
         }
     }, []);
 
-    // ✅ FIXED: Handle Approve Task
     const handleApproveTask = useCallback(async (taskId: string) => {
         try {
             const task = tasks.find(t => t.id === taskId);
@@ -515,15 +580,49 @@ const DashboardPage = () => {
                 return;
             }
 
-            // Only admin can approve
-            // Your existing approve logic here
+            if (currentUser.role !== 'admin') {
+                toast.error('Only administrators can approve tasks');
+                return;
+            }
+
+            const updatedTask = {
+                ...task,
+                completedApproval: !task.completedApproval
+            };
+
+            const response = await taskService.updateTask(taskId, {
+                completedApproval: !task.completedApproval
+            });
+
+            if (response.success) {
+                setTasks(prev => prev.map(t =>
+                    t.id === taskId ? updatedTask : t
+                ));
+
+                await handleAddTaskHistory(taskId, {
+                    taskId,
+                    action: task.completedApproval ? 'approval_removed' : 'task_approved',
+                    description: `Task ${task.completedApproval ? 'approval removed' : 'approved'} by Admin ${currentUser.name}`,
+                    userId: currentUser.id,
+                    userName: currentUser.name,
+                    userEmail: currentUser.email,
+                    userRole: currentUser.role,
+                });
+
+                toast.success(
+                    task.completedApproval
+                        ? 'Approval removed'
+                        : '✅ Task approved by admin!'
+                );
+            } else {
+                toast.error(response.message || 'Failed to approve task');
+            }
         } catch (error) {
             console.error('Error in approval:', error);
             toast.error('Failed to process approval');
         }
     }, [tasks, currentUser, handleAddTaskHistory]);
 
-    // ✅ FIXED: Handle Update Task Approval
     const handleUpdateTaskApproval = useCallback(async (taskId: string, completedApproval: boolean) => {
         try {
             const task = tasks.find(t => t.id === taskId);
@@ -532,31 +631,26 @@ const DashboardPage = () => {
                 return;
             }
 
-            // Check if user is assigner
             const isAssigner = task.assignedBy === currentUser.email;
             if (!isAssigner) {
                 toast.error('Only the task assigner can permanently approve tasks');
                 return;
             }
 
-            // Update task
             const updatedTask = {
                 ...task,
                 completedApproval: completedApproval
             };
 
-            // Update in backend
             const response = await taskService.updateTask(taskId, {
                 completedApproval: completedApproval
             });
 
             if (response.success) {
-                // Update local state
                 setTasks(prev => prev.map(t =>
                     t.id === taskId ? updatedTask : t
                 ));
 
-                // Add history
                 await handleAddTaskHistory(taskId, {
                     taskId,
                     action: completedApproval ? 'assigner_permanent_approved' : 'assigner_approval_removed',
@@ -581,11 +675,8 @@ const DashboardPage = () => {
         }
     }, [tasks, currentUser, handleAddTaskHistory]);
 
-    // ✅ FIXED: Handle Fetch Task History
     const handleFetchTaskHistory = useCallback(async (taskId: string): Promise<TaskHistory[]> => {
         try {
-            console.log('📜 Fetching history for task:', taskId);
-
             const response = await taskService.getTaskHistory(taskId);
 
             if (!response.success) {
@@ -604,19 +695,11 @@ const DashboardPage = () => {
     const getFilteredTasksByStat = useCallback(() => {
         if (!currentUser?.email) return [];
 
-        // 🔥 CRITICAL FIX: SHOW TASKS BASED ON USER ROLE AND ASSIGNMENT
         let filtered = tasks.filter((task) => {
-            // Admin sees all tasks
             if (currentUser.role === 'admin') return true;
-
-            // Regular users see:
-            // 1. Tasks assigned to them (दूसरों द्वारा assign किए गए tasks)
-            // 2. Tasks they assigned to others (अगर वे खुद assigner हैं)
-            return task.assignedTo === currentUser.email ||
-                task.assignedBy === currentUser.email;
+            return task.assignedTo === currentUser.email || task.assignedBy === currentUser.email;
         });
 
-        // Apply selected stat filter
         if (selectedStatFilter === 'completed') {
             filtered = filtered.filter((task) => task.status === 'completed');
         } else if (selectedStatFilter === 'pending') {
@@ -625,24 +708,38 @@ const DashboardPage = () => {
             filtered = filtered.filter((task) => task.status !== 'completed' && isOverdue(task.dueDate, task.status));
         }
 
-        // Apply advanced filters
         if (filters.status !== 'all') {
             filtered = filtered.filter((task) => task.status === filters.status);
         }
+
         if (filters.priority !== 'all') {
             filtered = filtered.filter((task) => task.priority === filters.priority);
         }
+
         if (filters.taskType !== 'all') {
-            filtered = filtered.filter((task) => task.taskType === filters.taskType);
-        }
-        if (filters.company !== 'all') {
-            filtered = filtered.filter((task) => task.companyName === filters.company);
-        }
-        if (filters.brand !== 'all') {
-            filtered = filtered.filter((task) => task.brand === filters.brand);
+            const filterType = filters.taskType.toLowerCase();
+            filtered = filtered.filter((task) => {
+                const taskType = (task.taskType || (task as any).type || '').toLowerCase();
+                return taskType === filterType;
+            });
         }
 
-        // Date filters
+        if (filters.company !== 'all') {
+            const filterCompany = filters.company.toLowerCase();
+            filtered = filtered.filter((task) => {
+                const taskCompany = (task.companyName || (task as any).company || '').toLowerCase();
+                return taskCompany === filterCompany;
+            });
+        }
+
+        if (filters.brand !== 'all') {
+            const filterBrand = filters.brand.toLowerCase();
+            filtered = filtered.filter((task) => {
+                const taskBrand = (task.brand || '').toLowerCase();
+                return taskBrand === filterBrand;
+            });
+        }
+
         if (filters.date === 'today') {
             filtered = filtered.filter((task) => new Date(task.dueDate).toDateString() === new Date().toDateString());
         } else if (filters.date === 'week') {
@@ -657,22 +754,27 @@ const DashboardPage = () => {
             filtered = filtered.filter((task) => isOverdue(task.dueDate, task.status));
         }
 
-        // Assigned filters
         if (filters.assigned === 'assigned-to-me') {
             filtered = filtered.filter((task) => task.assignedTo === currentUser.email);
         } else if (filters.assigned === 'assigned-by-me') {
             filtered = filtered.filter((task) => task.assignedBy === currentUser.email);
         }
 
-        // Search filter
         if (searchTerm) {
             const term = searchTerm.toLowerCase();
             filtered = filtered.filter((task) => {
                 const title = (task.title || '').toLowerCase();
                 const description = (task.description || '').toLowerCase();
-                const company = (task.companyName || '').toLowerCase();
+                const company = (task.companyName || (task as any).company || '').toLowerCase();
                 const brand = (task.brand || '').toLowerCase();
-                return title.includes(term) || description.includes(term) || company.includes(term) || brand.includes(term);
+                const typeVal = (task.taskType || (task as any).type || '').toLowerCase();
+                return (
+                    title.includes(term) ||
+                    description.includes(term) ||
+                    company.includes(term) ||
+                    brand.includes(term) ||
+                    typeVal.includes(term)
+                );
             });
         }
 
@@ -710,13 +812,20 @@ const DashboardPage = () => {
                 current: currentView === 'team',
                 onClick: () => setCurrentView('team'),
                 badge: users.length,
+                showForRoles: ['admin', 'manager'],
+            },
+            {
+                name: 'Profile',
+                icon: User,
+                current: currentView === 'profile',
+                onClick: () => setCurrentView('profile'),
+                badge: 0,
             },
         ],
         [currentView, tasks, users],
     );
 
     const stats: StatMeta[] = useMemo(() => {
-        // Calculate stats based on filtered tasks for current user
         const userTasks = tasks.filter(task => {
             if (currentUser.role === 'admin') return true;
             return task.assignedTo === currentUser.email || task.assignedBy === currentUser.email;
@@ -770,7 +879,6 @@ const DashboardPage = () => {
         ];
     }, [isOverdue, tasks, currentUser]);
 
-    // Utility functions for styling
     const getPriorityColor = useCallback((priority: TaskPriority) => {
         switch (priority) {
             case 'high': return 'border-red-300 bg-red-50 text-red-700';
@@ -853,7 +961,6 @@ const DashboardPage = () => {
             [field]: value,
         }));
 
-        // Clear error for this field
         if (formErrors[field]) {
             setFormErrors(prev => {
                 const newErrors = { ...prev };
@@ -862,7 +969,6 @@ const DashboardPage = () => {
             });
         }
 
-        // Reset brand if company changes
         if (field === 'companyName') {
             setNewTask(prev => ({
                 ...prev,
@@ -877,7 +983,6 @@ const DashboardPage = () => {
             [field]: value,
         }));
 
-        // Clear error for this field
         if (editFormErrors[field]) {
             setEditFormErrors(prev => {
                 const newErrors = { ...prev };
@@ -886,7 +991,6 @@ const DashboardPage = () => {
             });
         }
 
-        // Reset brand if company changes
         if (field === 'companyName') {
             setEditFormData(prev => ({
                 ...prev,
@@ -910,12 +1014,9 @@ const DashboardPage = () => {
             const selectedDate = new Date(newTask.dueDate);
             const today = new Date();
 
-            // Set both dates to start of day for accurate comparison
             selectedDate.setHours(0, 0, 0, 0);
             today.setHours(0, 0, 0, 0);
 
-            // Only show error if date is YESTERDAY or earlier
-            // Today and future dates are allowed
             const yesterday = new Date(today);
             yesterday.setDate(yesterday.getDate() - 1);
 
@@ -943,12 +1044,9 @@ const DashboardPage = () => {
             const selectedDate = new Date(editFormData.dueDate);
             const today = new Date();
 
-            // Set both dates to start of day for accurate comparison
             selectedDate.setHours(0, 0, 0, 0);
             today.setHours(0, 0, 0, 0);
 
-            // For editing, we can allow past dates if task already existed
-            // But show warning for dates too far in past
             const oneYearAgo = new Date(today);
             oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
 
@@ -981,9 +1079,31 @@ const DashboardPage = () => {
     const fetchUsers = useCallback(async () => {
         try {
             const response = await authService.getAllUsers();
-            if (response.success && response.data) {
-                setUsers(response.data as UserType[]);
+            if (!response) return;
+
+            let rawUsers: any[] = [];
+
+            if (Array.isArray(response)) {
+                rawUsers = response;
+            } else if (Array.isArray((response as any).data)) {
+                rawUsers = (response as any).data;
+            } else if (Array.isArray((response as any).result)) {
+                rawUsers = (response as any).result;
+            } else if ((response as any).success && Array.isArray((response as any).data)) {
+                rawUsers = (response as any).data;
             }
+
+            if (!rawUsers.length) return;
+
+            const normalizedUsers = rawUsers.map((user: any) => {
+                const id = user.id || user._id || user.userId || user.userid || '';
+                return {
+                    ...user,
+                    id,
+                } as UserType;
+            });
+
+            setUsers(normalizedUsers);
         } catch (error) {
             console.error('Failed to fetch users:', error);
         }
@@ -1013,26 +1133,28 @@ const DashboardPage = () => {
         fetchCurrentUser();
         fetchTasks();
         fetchUsers();
+
+        const savedSidebarState = localStorage.getItem('sidebarCollapsed');
+        if (savedSidebarState) {
+            setIsSidebarCollapsed(JSON.parse(savedSidebarState));
+        }
     }, [fetchCurrentUser, fetchTasks, fetchUsers]);
 
     const getAssignedToValue = (assignedTo: any): string => {
         if (!assignedTo) return '';
 
-        // If it's already a string
         if (typeof assignedTo === 'string') return assignedTo;
 
-        // If it's an object with email property
         if (typeof assignedTo === 'object' && assignedTo !== null) {
             return assignedTo.email || assignedTo.name || '';
         }
 
         return '';
     };
-    // ✅ ADD THIS: Function to open edit modal with task data
+
     const handleOpenEditModal = useCallback((task: Task) => {
         setEditingTask(task);
 
-        // Format date for input field (YYYY-MM-DD)
         const dueDate = task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : '';
 
         setEditFormData({
@@ -1050,7 +1172,7 @@ const DashboardPage = () => {
 
         setEditFormErrors({});
         setShowEditTaskModal(true);
-        setOpenMenuId(null); // Close any open menus
+        setOpenMenuId(null);
     }, []);
 
     const handleSaveTaskFromModal = useCallback(async () => {
@@ -1097,11 +1219,10 @@ const DashboardPage = () => {
             setIsCreatingTask(false);
         }
     }, [newTask, currentUser, users, validateForm]);
-    // Add this function before handleSaveEditedTask
+
     const trackFieldChange = useCallback((originalTask: Task, updatedData: any): string[] => {
         const changes: string[] = [];
 
-        // Get the assignedTo value from original task
         const getOriginalAssignedTo = (task: Task): string => {
             if (!task.assignedTo) return '';
             if (typeof task.assignedTo === 'string') return task.assignedTo;
@@ -1155,7 +1276,6 @@ const DashboardPage = () => {
         return changes;
     }, []);
 
-    // ✅ ADD THIS: Function to save edited task
     const handleSaveEditedTask = useCallback(async () => {
         if (!validateEditForm() || !editingTask) return;
 
@@ -1171,26 +1291,21 @@ const DashboardPage = () => {
                 companyName: editFormData.companyName,
                 brand: editFormData.brand,
                 status: editFormData.status,
-                // Keep original assigner and other fields
                 assignedBy: editingTask.assignedBy,
                 assignedToUser: users.find(u => u.email === editFormData.assignedTo),
             };
 
-            // ✅ FIXED: Track changes with proper typing
             const changes = trackFieldChange(editingTask, updateData);
 
             const response = await taskService.updateTask(editingTask.id, updateData);
             if (response.success && response.data) {
-                // Update local state
                 setTasks(prev => prev.map(task =>
                     task.id === editingTask.id ? response.data as Task : task
                 ));
 
-                // ✅ FIXED: Add history with safe user data
                 if (changes && changes.length > 0) {
                     const changeDescription = changes.join(', ');
 
-                    // Safe currentUser
                     const safeUser = currentUser || {
                         id: 'guest-user',
                         name: 'Guest User',
@@ -1215,11 +1330,9 @@ const DashboardPage = () => {
                         }
                     } catch (error) {
                         console.error('Error adding edit history:', error);
-                        // Continue even if history fails
                     }
                 }
 
-                // Close modal and reset
                 setShowEditTaskModal(false);
                 setEditingTask(null);
                 setEditFormData({
@@ -1384,51 +1497,37 @@ const DashboardPage = () => {
     }, [tasks, canEditDeleteTask]);
 
     const handleUpdateTask = useCallback(async (taskId: string, updatedData: Partial<Task>): Promise<Task | null> => {
-        console.log('Updating task:', taskId, updatedData);
-
         const task = tasks.find(t => t.id === taskId);
         if (!task) {
-            console.error('Task not found:', taskId);
             toast.error('Task not found');
             return null;
         }
 
-        // Check permissions
         if (!canEditDeleteTask(task)) {
-            console.error('User not authorized to edit this task');
             toast.error('Only the task creator can edit this task');
             return null;
         }
 
         try {
-            // Prepare data for API
             const updatePayload = {
                 ...updatedData,
                 updatedAt: new Date().toISOString()
             };
 
-            console.log('Sending update to API:', updatePayload);
-
-            // Call API
             const response = await taskService.updateTask(taskId, updatePayload);
 
             if (!response.success) {
-                console.error('API error:', response.message);
                 toast.error(response.message || 'Failed to update task');
                 return null;
             }
 
             if (!response.data) {
-                console.error('No data in response');
                 toast.error('No data received from server');
                 return null;
             }
 
-            // Get updated task
             const updatedTask = response.data as Task;
-            console.log('Task updated successfully:', updatedTask);
 
-            // Update local state
             updateTaskInState(updatedTask);
             toast.success('Task updated successfully');
 
@@ -1451,35 +1550,186 @@ const DashboardPage = () => {
         }
     }, [tasks, canEditDeleteTask, updateTaskInState]);
 
-    const handleDeleteUser = useCallback(async (userId: string) => {
+    const handleUpdateProfile = useCallback(async (updatedData: Partial<UserType>) => {
         try {
-            console.log('Deleting user with ID:', userId);
-            toast.success('User deleted successfully');
-            setUsers(prev => prev.filter(user => user.id !== userId));
+            const loadingToast = toast.loading('Updating profile...');
+
+            const updatedUser = {
+                ...currentUser,
+                ...updatedData,
+                updatedAt: new Date().toISOString()
+            };
+
+            if (authService.updateUser) {
+                const response = await authService.updateUser(currentUser.id, updatedUser);
+
+                toast.dismiss(loadingToast);
+
+                if (response.success) {
+                    setCurrentUser(updatedUser);
+                    localStorage.setItem('currentUser', JSON.stringify(updatedUser));
+                    toast.success('Profile updated successfully');
+                } else {
+                    toast.error(response.message || 'Failed to update profile');
+                }
+            } else {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+
+                setCurrentUser(updatedUser);
+                localStorage.setItem('currentUser', JSON.stringify(updatedUser));
+
+                toast.dismiss(loadingToast);
+                toast.success('Profile updated successfully (demo)');
+            }
         } catch (error) {
-            console.error('Error deleting user:', error);
-            toast.error('Failed to delete user');
+            console.error('Error updating profile:', error);
+            toast.error('Failed to update profile');
         }
-    }, []);
+    }, [currentUser]);
 
     if (loading) {
         return (
-            <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
-                <div className="text-center">
-                    <div className="relative">
-                        <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-600 border-t-transparent"></div>
-                        <div className="absolute inset-0 flex items-center justify-center">
-                            <ListTodo className="h-8 w-8 text-blue-600" />
+            <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex">
+                <div className="hidden md:flex flex-col w-64 bg-white border-r border-gray-200 animate-pulse">
+                    <div className="p-6 border-b border-gray-100">
+                        <div className="flex items-center space-x-3">
+                            <div className="h-8 w-8 bg-gray-300 rounded-lg"></div>
+                            <div className="h-6 w-32 bg-gray-400 rounded"></div>
                         </div>
                     </div>
-                    <p className="mt-4 text-gray-600 font-medium">Loading your workspace...</p>
+
+                    <div className="flex-1 p-4 space-y-2">
+                        {[...Array(6)].map((_, i) => (
+                            <div key={i} className="flex items-center space-x-3 p-3 rounded-lg">
+                                <div className="h-5 w-5 bg-gray-300 rounded"></div>
+                                <div className="h-4 w-28 bg-gray-300 rounded"></div>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className="p-4 border-t border-gray-100">
+                        <div className="flex items-center space-x-3">
+                            <div className="h-10 w-10 bg-gray-300 rounded-full"></div>
+                            <div className="flex-1">
+                                <div className="h-4 w-24 bg-gray-400 rounded mb-2"></div>
+                                <div className="h-3 w-16 bg-gray-300 rounded"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="flex-1 flex flex-col">
+                    <div className="sticky top-0 z-40 bg-white border-b border-gray-200 animate-pulse">
+                        <div className="px-4 sm:px-6 md:px-8 py-4">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center space-x-3">
+                                    <div className="h-8 w-8 bg-gray-300 rounded-full"></div>
+                                    <div className="h-6 w-32 bg-gray-400 rounded"></div>
+                                </div>
+                                <div className="flex items-center space-x-3">
+                                    <div className="h-8 w-48 bg-gray-300 rounded"></div>
+                                    <div className="h-8 w-8 bg-gray-300 rounded-full"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <main className="flex-1 p-6 overflow-auto">
+                        <div className="py-8">
+                            <div className="max-w-full mx-auto px-4 sm:px-6 md:px-8">
+                                <div className="mb-10">
+                                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
+                                        <div>
+                                            <div className="flex items-center gap-3 mb-2">
+                                                <div className="h-8 w-8 bg-gray-300 rounded-xl"></div>
+                                                <div className="h-8 w-48 bg-gray-400 rounded"></div>
+                                            </div>
+                                            <div className="h-4 w-64 bg-gray-300 rounded"></div>
+                                        </div>
+                                        <div className="flex gap-3">
+                                            <div className="h-10 w-32 bg-gray-300 rounded-xl"></div>
+                                            <div className="h-10 w-32 bg-gray-300 rounded-xl"></div>
+                                            <div className="h-10 w-32 bg-gray-300 rounded-xl"></div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="mb-10">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+                                        {[...Array(4)].map((_, i) => (
+                                            <div key={i} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 animate-pulse">
+                                                <div className="flex items-start justify-between">
+                                                    <div className="flex-1">
+                                                        <div className="flex items-center gap-3 mb-3">
+                                                            <div className="h-12 w-12 bg-gray-300 rounded-xl"></div>
+                                                            <div>
+                                                                <div className="h-4 w-24 bg-gray-300 rounded mb-2"></div>
+                                                                <div className="h-8 w-16 bg-gray-400 rounded"></div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-6 animate-pulse">
+                                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                        <div>
+                                            <div className="flex items-center gap-3 mb-2">
+                                                <div className="h-5 w-5 bg-gray-300 rounded"></div>
+                                                <div className="h-6 w-32 bg-gray-400 rounded"></div>
+                                            </div>
+                                            <div className="h-4 w-48 bg-gray-300 rounded"></div>
+                                        </div>
+                                        <div className="flex gap-3">
+                                            <div className="h-8 w-20 bg-gray-300 rounded-lg"></div>
+                                            <div className="h-8 w-20 bg-gray-300 rounded-lg"></div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                    {[...Array(6)].map((_, i) => (
+                                        <div key={i} className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 animate-pulse">
+                                            <div className="flex justify-between items-start mb-4">
+                                                <div className="flex-1">
+                                                    <div className="flex items-center gap-2 mb-3">
+                                                        <div className="h-6 w-16 bg-gray-300 rounded-full"></div>
+                                                        <div className="h-6 w-20 bg-gray-300 rounded-full"></div>
+                                                    </div>
+                                                    <div className="h-6 w-3/4 bg-gray-400 rounded mb-3"></div>
+                                                    <div className="h-4 w-full bg-gray-300 rounded mb-3"></div>
+                                                    <div className="h-4 w-2/3 bg-gray-300 rounded"></div>
+                                                </div>
+                                                <div className="h-6 w-6 bg-gray-300 rounded-lg"></div>
+                                            </div>
+                                            <div className="space-y-3 mb-5">
+                                                {[...Array(4)].map((_, j) => (
+                                                    <div key={j} className="flex items-center justify-between">
+                                                        <div className="h-4 w-20 bg-gray-300 rounded"></div>
+                                                        <div className="h-4 w-24 bg-gray-400 rounded"></div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            <div className="flex gap-2 pt-4 border-t border-gray-100">
+                                                <div className="flex-1 h-8 bg-gray-300 rounded-lg"></div>
+                                                <div className="w-16 h-8 bg-gray-300 rounded-lg"></div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </main>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+        <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex">
             <Sidebar
                 sidebarOpen={sidebarOpen}
                 setSidebarOpen={setSidebarOpen}
@@ -1490,9 +1740,11 @@ const DashboardPage = () => {
                     localStorage.removeItem('currentUser');
                     navigate('/login');
                 }}
+                isCollapsed={isSidebarCollapsed}
+                setIsCollapsed={setIsSidebarCollapsed}
             />
 
-            <div className="lg:pl-64 flex flex-col flex-1">
+            <div className={mainContentClasses}>
                 <Navbar
                     setSidebarOpen={setSidebarOpen}
                     searchTerm={searchTerm}
@@ -1505,14 +1757,14 @@ const DashboardPage = () => {
                         localStorage.removeItem('currentUser');
                         navigate('/login');
                     }}
+                    isSidebarCollapsed={isSidebarCollapsed}
                 />
 
-                <main className="flex-1">
+                <main className="flex-1 overflow-auto">
                     <div className="py-8">
-                        <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8">
+                        <div className={dashboardContainerClasses}>
                             {currentView === 'dashboard' ? (
                                 <>
-                                    {/* Header with Welcome */}
                                     <div className="mb-10">
                                         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
                                             <div>
@@ -1563,7 +1815,6 @@ const DashboardPage = () => {
                                         </div>
                                     </div>
 
-                                    {/* Advanced Filters Panel */}
                                     {showAdvancedFilters && (
                                         <div className="mb-8 bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
                                             <div className="flex items-center justify-between mb-4">
@@ -1588,7 +1839,6 @@ const DashboardPage = () => {
                                             </div>
 
                                             <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-4">
-                                                {/* Status Filter */}
                                                 <div>
                                                     <label className="block text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wider">
                                                         Status
@@ -1605,7 +1855,6 @@ const DashboardPage = () => {
                                                     </select>
                                                 </div>
 
-                                                {/* Priority Filter */}
                                                 <div>
                                                     <label className="block text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wider">
                                                         Priority
@@ -1622,7 +1871,6 @@ const DashboardPage = () => {
                                                     </select>
                                                 </div>
 
-                                                {/* Assigned Filter */}
                                                 <div>
                                                     <label className="block text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wider">
                                                         Assigned
@@ -1638,7 +1886,6 @@ const DashboardPage = () => {
                                                     </select>
                                                 </div>
 
-                                                {/* Date Filter */}
                                                 <div>
                                                     <label className="block text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wider">
                                                         Due Date
@@ -1655,7 +1902,6 @@ const DashboardPage = () => {
                                                     </select>
                                                 </div>
 
-                                                {/* Task Type Filter */}
                                                 <div>
                                                     <label className="block text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wider">
                                                         Type
@@ -1673,7 +1919,6 @@ const DashboardPage = () => {
                                                     </select>
                                                 </div>
 
-                                                {/* Company Filter */}
                                                 <div>
                                                     <label className="block text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wider">
                                                         Company
@@ -1691,7 +1936,6 @@ const DashboardPage = () => {
                                                     </select>
                                                 </div>
 
-                                                {/* Brand Filter */}
                                                 <div>
                                                     <label className="block text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wider">
                                                         Brand
@@ -1720,7 +1964,6 @@ const DashboardPage = () => {
                                         </div>
                                     )}
 
-                                    {/* Stats Grid - Enhanced */}
                                     <div className="mb-10">
                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
                                             {stats.map((stat) => (
@@ -1778,7 +2021,6 @@ const DashboardPage = () => {
                                         </div>
                                     </div>
 
-                                    {/* Tasks Header */}
                                     <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-6">
                                         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                                             <div>
@@ -1801,7 +2043,6 @@ const DashboardPage = () => {
                                             </div>
 
                                             <div className="flex flex-wrap items-center gap-3">
-                                                {/* View Toggle */}
                                                 <div className="flex items-center bg-gray-100 rounded-xl p-1">
                                                     <button
                                                         onClick={() => setViewMode('grid')}
@@ -1823,7 +2064,6 @@ const DashboardPage = () => {
                                                     </button>
                                                 </div>
 
-                                                {/* Quick Actions */}
                                                 <div className="flex gap-2">
                                                     {getActiveFilterCount() > 0 && (
                                                         <button
@@ -1845,7 +2085,6 @@ const DashboardPage = () => {
                                         </div>
                                     </div>
 
-                                    {/* Tasks Display - Enhanced Grid */}
                                     {displayTasks.length === 0 ? (
                                         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-12 text-center">
                                             <div className="max-w-md mx-auto">
@@ -1872,157 +2111,172 @@ const DashboardPage = () => {
                                             </div>
                                         </div>
                                     ) : viewMode === 'grid' ? (
-                                        // Enhanced Grid View
                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                            {displayTasks.map((task: any) => (
-                                                <div
-                                                    key={task.id}
-                                                    className="group bg-white rounded-2xl shadow-sm border border-gray-200 p-5 hover:shadow-lg transition-all duration-200 hover:-translate-y-1 relative"
-                                                >
-                                                    {/* Task Header */}
-                                                    <div className="flex justify-between items-start mb-4">
-                                                        <div className="flex-1">
-                                                            <div className="flex items-center gap-2 mb-3">
-                                                                <span className={`px-3 py-1 text-xs font-medium rounded-full border ${getPriorityColor(task.priority)}`}>
-                                                                    <span className="flex items-center gap-1">
-                                                                        <Flag className="h-3 w-3" />
-                                                                        {task.priority}
-                                                                    </span>
-                                                                </span>
-                                                                <span className={`px-3 py-1 text-xs font-medium rounded-full border ${getStatusColor(task.status)}`}>
-                                                                    {task.status}
-                                                                    {task.completedApproval && (
-                                                                        <span className="ml-1 text-blue-500">✅</span>
-                                                                    )}
-                                                                </span>
-                                                            </div>
-                                                            <h3 className="text-lg font-semibold text-gray-900 mb-2 group-hover:text-blue-600 transition-colors">
-                                                                {task.title}
-                                                                {task.completedApproval && (
-                                                                    <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded-full">
-                                                                        Approved
-                                                                    </span>
-                                                                )}
-                                                            </h3>
-                                                            <p className="text-sm text-gray-500 line-clamp-2 mb-3">
-                                                                {task.description || 'No description provided'}
-                                                            </p>
-                                                        </div>
-                                                        <button
-                                                            onClick={() => setOpenMenuId(openMenuId === task.id ? null : task.id)}
-                                                            className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-1.5 rounded-lg"
-                                                        >
-                                                            <MoreVertical className="h-5 w-5" />
-                                                        </button>
-                                                    </div>
+                                            {displayTasks
+                                                .filter((task: Task) => {
+                                                    if (filters.taskType !== 'all') {
+                                                        const filterType = filters.taskType.toLowerCase();
+                                                        const taskType = (task.taskType || (task as any).type || '').toLowerCase();
+                                                        if (taskType !== filterType) return false;
+                                                    }
 
-                                                    {/* Task Metadata */}
-                                                    <div className="space-y-3 mb-5">
-                                                        <div className="flex items-center justify-between text-sm">
-                                                            <span className="text-gray-500 flex items-center gap-2">
-                                                                <UserCheck className="h-4 w-4" />
-                                                                Assigned To
-                                                            </span>
-                                                            <span className="font-medium text-gray-900">
-                                                                {getAssignedUserInfo(task).name}
-                                                            </span>
+                                                    if (filters.company !== 'all') {
+                                                        const filterCompany = filters.company.toLowerCase();
+                                                        const taskCompany = (task.companyName || (task as any).company || '').toLowerCase();
+                                                        if (taskCompany !== filterCompany) return false;
+                                                    }
+
+                                                    if (filters.brand !== 'all') {
+                                                        const filterBrand = filters.brand.toLowerCase();
+                                                        const taskBrand = (task.brand || '').toLowerCase();
+                                                        if (taskBrand !== filterBrand) return false;
+                                                    }
+
+                                                    return true;
+                                                })
+                                                .map((task: Task) => (
+                                                    <div
+                                                        key={task.id}
+                                                        className="group bg-white rounded-2xl shadow-sm border border-gray-200 p-5 hover:shadow-lg transition-all duration-200 hover:-translate-y-1 relative"
+                                                    >
+                                                        <div className="flex justify-between items-start mb-4">
+                                                            <div className="flex-1">
+                                                                <div className="flex items-center gap-2 mb-3">
+                                                                    <span className={`px-3 py-1 text-xs font-medium rounded-full border ${getPriorityColor(task.priority || 'medium')}`}>
+                                                                        <span className="flex items-center gap-1">
+                                                                            <Flag className="h-3 w-3" />
+                                                                            {task.priority}
+                                                                        </span>
+                                                                    </span>
+                                                                    <span className={`px-3 py-1 text-xs font-medium rounded-full border ${getStatusColor(task.status)}`}>
+                                                                        {task.status}
+                                                                        {task.completedApproval && (
+                                                                            <span className="ml-1 text-blue-500">✅</span>
+                                                                        )}
+                                                                    </span>
+                                                                </div>
+                                                                <h3 className="text-lg font-semibold text-gray-900 mb-2 group-hover:text-blue-600 transition-colors">
+                                                                    {task.title}
+                                                                    {task.completedApproval && (
+                                                                        <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded-full">
+                                                                            Approved
+                                                                        </span>
+                                                                    )}
+                                                                </h3>
+                                                                <p className="text-sm text-gray-500 line-clamp-2 mb-3">
+                                                                    {task.description || 'No description provided'}
+                                                                </p>
+                                                            </div>
+                                                            <button
+                                                                onClick={() => setOpenMenuId(openMenuId === task.id ? null : task.id)}
+                                                                className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-1.5 rounded-lg"
+                                                            >
+                                                                <MoreVertical className="h-5 w-5" />
+                                                            </button>
                                                         </div>
-                                                        <div className="flex items-center justify-between text-sm">
-                                                            <span className="text-gray-500 flex items-center gap-2">
-                                                                <CalendarDays className="h-4 w-4" />
-                                                                Due Date
-                                                            </span>
-                                                            <span className={`font-medium ${isOverdue(task.dueDate, task.status)
-                                                                ? 'text-rose-600'
-                                                                : 'text-gray-900'
-                                                                }`}>
-                                                                {formatDate(task.dueDate)}
-                                                            </span>
-                                                        </div>
-                                                        <div className="flex items-center justify-between text-sm">
-                                                            <span className="text-gray-500 flex items-center gap-2">
-                                                                <Building className="h-4 w-4" />
-                                                                Company
-                                                            </span>
-                                                            <span className={`px-2 py-1 text-xs rounded-full border ${getCompanyColor(task.companyName)}`}>
-                                                                {task.companyName}
-                                                            </span>
-                                                        </div>
-                                                        {task.brand && (
+
+                                                        <div className="space-y-3 mb-5">
                                                             <div className="flex items-center justify-between text-sm">
                                                                 <span className="text-gray-500 flex items-center gap-2">
-                                                                    <Tag className="h-4 w-4" />
-                                                                    Brand
+                                                                    <UserCheck className="h-4 w-4" />
+                                                                    Assigned To
                                                                 </span>
-                                                                <span className={`px-2 py-1 text-xs rounded-full border ${getBrandColor(task.brand)}`}>
-                                                                    {task.brand}
+                                                                <span className="font-medium text-gray-900">
+                                                                    {getAssignedUserInfo(task).name}
                                                                 </span>
                                                             </div>
-                                                        )}
-                                                    </div>
+                                                            <div className="flex items-center justify-between text-sm">
+                                                                <span className="text-gray-500 flex items-center gap-2">
+                                                                    <CalendarDays className="h-4 w-4" />
+                                                                    Due Date
+                                                                </span>
+                                                                <span className={`font-medium ${isOverdue(task.dueDate, task.status)
+                                                                    ? 'text-rose-600'
+                                                                    : 'text-gray-900'
+                                                                    }`}>
+                                                                    {formatDate(task.dueDate)}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex items-center justify-between text-sm">
+                                                                <span className="text-gray-500 flex items-center gap-2">
+                                                                    <Building className="h-4 w-4" />
+                                                                    Company
+                                                                </span>
+                                                                <span className={`px-2 py-1 text-xs rounded-full border ${getCompanyColor(task.companyName)}`}>
+                                                                    {task.companyName}
+                                                                </span>
+                                                            </div>
+                                                            {task.brand && (
+                                                                <div className="flex items-center justify-between text-sm">
+                                                                    <span className="text-gray-500 flex items-center gap-2">
+                                                                        <Tag className="h-4 w-4" />
+                                                                        Brand
+                                                                    </span>
+                                                                    <span className={`px-2 py-1 text-xs rounded-full border ${getBrandColor(task.brand)}`}>
+                                                                        {task.brand}
+                                                                    </span>
+                                                                </div>
+                                                            )}
+                                                        </div>
 
-                                                    {/* Action Buttons */}
-                                                    <div className="flex gap-2 pt-4 border-t border-gray-100">
-                                                        <button
-                                                            onClick={() => handleToggleTaskStatus(task.id, task.status)}
-                                                            disabled={!canMarkTaskDone(task)}
-                                                            className={`flex-1 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${canMarkTaskDone(task)
-                                                                ? task.status === 'completed'
-                                                                    ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
-                                                                    : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
-                                                                : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                                                }`}
-                                                        >
-                                                            {task.status === 'completed' ? 'Mark Pending' : 'Complete'}
-                                                        </button>
-                                                        {canEditDeleteTask(task) && (
+                                                        <div className="flex gap-2 pt-4 border-t border-gray-100">
                                                             <button
-                                                                onClick={() => handleDeleteTask(task.id)}
-                                                                className="px-3 py-2 text-sm font-medium bg-rose-50 text-rose-700 rounded-lg hover:bg-rose-100 transition-colors"
+                                                                onClick={() => handleToggleTaskStatus(task.id, task.status)}
+                                                                disabled={!canMarkTaskDone(task)}
+                                                                className={`flex-1 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${canMarkTaskDone(task)
+                                                                    ? task.status === 'completed'
+                                                                        ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                                                                        : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                                                                    : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                                                    }`}
                                                             >
-                                                                Delete
-                                                            </button>
-                                                        )}
-                                                    </div>
-
-                                                    {/* Task Type Badge */}
-                                                    <div className="absolute top-4 right-4">
-                                                        <span className="text-xs text-gray-400 flex items-center gap-1">
-                                                            <Tag className="h-3 w-3" />
-                                                            {task.taskType}
-                                                        </span>
-                                                    </div>
-
-                                                    {/* Dropdown Menu */}
-                                                    {openMenuId === task.id && (
-                                                        <div className="absolute right-5 top-12 mt-2 w-48 bg-white rounded-xl shadow-lg border border-gray-200 py-2 z-10">
-                                                            <button
-                                                                onClick={() => {
-                                                                    handleOpenEditModal(task);
-                                                                }}
-                                                                className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
-                                                            >
-                                                                <Edit className="h-4 w-4" />
-                                                                Edit Task
+                                                                {task.status === 'completed' ? 'Mark Pending' : 'Complete'}
                                                             </button>
                                                             {canEditDeleteTask(task) && (
                                                                 <button
-                                                                    onClick={() => {
-                                                                        handleDeleteTask(task.id);
-                                                                        setOpenMenuId(null);
-                                                                    }}
-                                                                    className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100"
+                                                                    onClick={() => handleDeleteTask(task.id)}
+                                                                    className="px-3 py-2 text-sm font-medium bg-rose-50 text-rose-700 rounded-lg hover:bg-rose-100 transition-colors"
                                                                 >
-                                                                    Delete Task
+                                                                    Delete
                                                                 </button>
                                                             )}
                                                         </div>
-                                                    )}
-                                                </div>
-                                            ))}
+
+                                                        <div className="absolute top-4 right-4">
+                                                            <span className="text-xs text-gray-400 flex items-center gap-1">
+                                                                <Tag className="h-3 w-3" />
+                                                                {task.taskType}
+                                                            </span>
+                                                        </div>
+
+                                                        {openMenuId === task.id && (
+                                                            <div className="absolute right-5 top-12 mt-2 w-48 bg-white rounded-xl shadow-lg border border-gray-200 py-2 z-10">
+                                                                <button
+                                                                    onClick={() => {
+                                                                        handleOpenEditModal(task);
+                                                                    }}
+                                                                    className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
+                                                                >
+                                                                    <Edit className="h-4 w-4" />
+                                                                    Edit Task
+                                                                </button>
+                                                                {canEditDeleteTask(task) && (
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            handleDeleteTask(task.id);
+                                                                            setOpenMenuId(null);
+                                                                        }}
+                                                                        className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100"
+                                                                    >
+                                                                        Delete Task
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ))}
                                         </div>
                                     ) : (
-                                        // Enhanced List View
                                         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
                                             <div className="overflow-x-auto">
                                                 <table className="min-w-full divide-y divide-gray-200">
@@ -2049,100 +2303,122 @@ const DashboardPage = () => {
                                                         </tr>
                                                     </thead>
                                                     <tbody className="bg-white divide-y divide-gray-200">
-                                                        {displayTasks.map((task) => (
-                                                            <tr key={task.id} className="hover:bg-gray-50 transition-colors">
-                                                                <td className="px-6 py-4">
-                                                                    <div>
-                                                                        <div className="flex items-center gap-2 mb-1">
-                                                                            <span className="text-sm font-semibold text-gray-900">
-                                                                                {task.title}
-                                                                            </span>
-                                                                            {task.completedApproval && (
-                                                                                <span className="text-xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded-full">
-                                                                                    ✅ Approved
-                                                                                </span>
-                                                                            )}
-                                                                            <span className={`px-2 py-0.5 text-xs rounded-full border ${getCompanyColor(task.companyName)}`}>
-                                                                                {task.companyName}
-                                                                            </span>
-                                                                            {task.brand && (
-                                                                                <span className={`px-2 py-0.5 text-xs rounded-full border ${getBrandColor(task.brand)}`}>
-                                                                                    {task.brand}
-                                                                                </span>
-                                                                            )}
-                                                                        </div>
-                                                                        <div className="text-sm text-gray-500 truncate max-w-xs">
-                                                                            {task.description || 'No description'}
-                                                                        </div>
-                                                                        <div className="text-xs text-gray-400 mt-1 flex items-center gap-2">
-                                                                            <Tag className="h-3 w-3" />
-                                                                            {task.taskType}
-                                                                        </div>
-                                                                    </div>
-                                                                </td>
-                                                                <td className="px-6 py-4 whitespace-nowrap">
-                                                                    <div className="flex items-center gap-2">
-                                                                        <div className="w-8 h-8 rounded-full bg-gradient-to-r from-blue-500 to-blue-600 flex items-center justify-center text-white text-sm font-medium">
-                                                                            {getAssignedUserInfo(task).name.charAt(0)}
-                                                                        </div>
+                                                        {displayTasks
+                                                            .filter((task: Task) => {
+                                                                if (filters.taskType !== 'all') {
+                                                                    const filterType = filters.taskType.toLowerCase();
+                                                                    const taskType = (task.taskType || (task as any).type || '').toLowerCase();
+                                                                    if (taskType !== filterType) return false;
+                                                                }
+
+                                                                if (filters.company !== 'all') {
+                                                                    const filterCompany = filters.company.toLowerCase();
+                                                                    const taskCompany = (task.companyName || (task as any).company || '').toLowerCase();
+                                                                    if (taskCompany !== filterCompany) return false;
+                                                                }
+
+                                                                if (filters.brand !== 'all') {
+                                                                    const filterBrand = filters.brand.toLowerCase();
+                                                                    const taskBrand = (task.brand || '').toLowerCase();
+                                                                    if (taskBrand !== filterBrand) return false;
+                                                                }
+
+                                                                return true;
+                                                            })
+                                                            .map((task) => (
+                                                                <tr key={task.id} className="hover:bg-gray-50 transition-colors">
+                                                                    <td className="px-6 py-4">
                                                                         <div>
-                                                                            <div className="text-sm font-medium text-gray-900">
-                                                                                {getAssignedUserInfo(task).name}
+                                                                            <div className="flex items-center gap-2 mb-1">
+                                                                                <span className="text-sm font-semibold text-gray-900">
+                                                                                    {task.title}
+                                                                                </span>
+                                                                                {task.completedApproval && (
+                                                                                    <span className="text-xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded-full">
+                                                                                        ✅ Approved
+                                                                                    </span>
+                                                                                )}
+                                                                                <span className={`px-2 py-0.5 text-xs rounded-full border ${getCompanyColor(task.companyName)}`}>
+                                                                                    {task.companyName}
+                                                                                </span>
+                                                                                {task.brand && (
+                                                                                    <span className={`px-2 py-0.5 text-xs rounded-full border ${getBrandColor(task.brand)}`}>
+                                                                                        {task.brand}
+                                                                                    </span>
+                                                                                )}
                                                                             </div>
-                                                                            <div className="text-xs text-gray-500">
-                                                                                {getAssignedUserInfo(task).email}
+                                                                            <div className="text-sm text-gray-500 truncate max-w-xs">
+                                                                                {task.description || 'No description'}
+                                                                            </div>
+                                                                            <div className="text-xs text-gray-400 mt-1 flex items-center gap-2">
+                                                                                <Tag className="h-3 w-3" />
+                                                                                {task.taskType}
                                                                             </div>
                                                                         </div>
-                                                                    </div>
-                                                                </td>
-                                                                <td className="px-6 py-4 whitespace-nowrap">
-                                                                    <div className={`text-sm font-medium ${isOverdue(task.dueDate, task.status)
-                                                                        ? 'text-rose-600'
-                                                                        : 'text-gray-900'
-                                                                        }`}>
-                                                                        {formatDate(task.dueDate)}
-                                                                    </div>
-                                                                    <div className="text-xs text-gray-500">
-                                                                        {isOverdue(task.dueDate, task.status) ? 'Overdue' : 'On track'}
-                                                                    </div>
-                                                                </td>
-                                                                <td className="px-6 py-4 whitespace-nowrap">
-                                                                    <span className={`px-3 py-1 text-xs font-medium rounded-full border ${getStatusColor(task.status)}`}>
-                                                                        {task.status}
-                                                                    </span>
-                                                                </td>
-                                                                <td className="px-6 py-4 whitespace-nowrap">
-                                                                    <span className={`px-3 py-1 text-xs font-medium rounded-full border ${getPriorityColor(task.priority || 'medium')}`}>
-                                                                        {task.priority}
-                                                                    </span>
-                                                                </td>
-                                                                <td className="px-6 py-4 whitespace-nowrap">
-                                                                    <div className="flex items-center gap-2">
-                                                                        <button
-                                                                            onClick={() => handleToggleTaskStatus(task.id, task.status)}
-                                                                            disabled={!canMarkTaskDone(task)}
-                                                                            className={`px-3 py-1.5 text-xs font-medium rounded-lg ${canMarkTaskDone(task)
-                                                                                ? task.status === 'completed'
-                                                                                    ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
-                                                                                    : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
-                                                                                : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                                                                }`}
-                                                                        >
-                                                                            {task.status === 'completed' ? 'Pending' : 'Complete'}
-                                                                        </button>
-                                                                        {canEditDeleteTask(task) && (
+                                                                    </td>
+                                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                                        <div className="flex items-center gap-2">
+                                                                            <div className="w-8 h-8 rounded-full bg-gradient-to-r from-blue-500 to-blue-600 flex items-center justify-center text-white text-sm font-medium">
+                                                                                {getAssignedUserInfo(task).name.charAt(0)}
+                                                                            </div>
+                                                                            <div>
+                                                                                <div className="text-sm font-medium text-gray-900">
+                                                                                    {getAssignedUserInfo(task).name}
+                                                                                </div>
+                                                                                <div className="text-xs text-gray-500">
+                                                                                    {getAssignedUserInfo(task).email}
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    </td>
+                                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                                        <div className={`text-sm font-medium ${isOverdue(task.dueDate, task.status)
+                                                                            ? 'text-rose-600'
+                                                                            : 'text-gray-900'
+                                                                            }`}>
+                                                                            {formatDate(task.dueDate)}
+                                                                        </div>
+                                                                        <div className="text-xs text-gray-500">
+                                                                            {isOverdue(task.dueDate, task.status) ? 'Overdue' : 'On track'}
+                                                                        </div>
+                                                                    </td>
+                                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                                        <span className={`px-3 py-1 text-xs font-medium rounded-full border ${getStatusColor(task.status)}`}>
+                                                                            {task.status}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                                        <span className={`px-3 py-1 text-xs font-medium rounded-full border ${getPriorityColor(task.priority || 'medium')}`}>
+                                                                            {task.priority}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                                        <div className="flex items-center gap-2">
                                                                             <button
-                                                                                onClick={() => handleOpenEditModal(task)}
-                                                                                className="px-3 py-1.5 text-xs font-medium bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 flex items-center gap-1"
+                                                                                onClick={() => handleToggleTaskStatus(task.id, task.status)}
+                                                                                disabled={!canMarkTaskDone(task)}
+                                                                                className={`px-3 py-1.5 text-xs font-medium rounded-lg ${canMarkTaskDone(task)
+                                                                                    ? task.status === 'completed'
+                                                                                        ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                                                                                        : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                                                                                    : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                                                                    }`}
                                                                             >
-                                                                                <Edit className="h-3 w-3" />
-                                                                                Edit
+                                                                                {task.status === 'completed' ? 'Pending' : 'Complete'}
                                                                             </button>
-                                                                        )}
-                                                                    </div>
-                                                                </td>
-                                                            </tr>
-                                                        ))}
+                                                                            {canEditDeleteTask(task) && (
+                                                                                <button
+                                                                                    onClick={() => handleOpenEditModal(task)}
+                                                                                    className="px-3 py-1.5 text-xs font-medium bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 flex items-center gap-1"
+                                                                                >
+                                                                                    <Edit className="h-3 w-3" />
+                                                                                    Edit
+                                                                                </button>
+                                                                            )}
+                                                                        </div>
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
                                                     </tbody>
                                                 </table>
                                             </div>
@@ -2185,6 +2461,7 @@ const DashboardPage = () => {
                                     onUpdateTaskApproval={handleUpdateTaskApproval}
                                     onFetchTaskHistory={handleFetchTaskHistory}
                                     onBulkCreateTasks={handleBulkCreateTasks}
+                                    isSidebarCollapsed={isSidebarCollapsed}
                                 />
                             ) : currentView === 'calendar' ? (
                                 <CalendarView
@@ -2226,18 +2503,24 @@ const DashboardPage = () => {
                                     formatDate={formatDate}
                                     isOverdue={isOverdue}
                                 />
-
                             ) : currentView === 'team' ? (
                                 <TeamPage
                                     users={users}
                                     tasks={tasks}
-                                    onEditUser={(user) => console.log('Edit user:', user)}
+                                    onUpdateUser={handleUpdateUser}
                                     onDeleteUser={handleDeleteUser}
-                                    onAddUser={() => console.log('Add user')}
-                                    getAssignedByInfo={getAssignedByInfo}
-                                    formatDate={formatDate}
+                                    onAddUser={handleCreateUser}
                                     isOverdue={isOverdue}
                                     currentUser={currentUser}
+                                />
+                            ) : currentView === 'profile' ? (
+                                <UserProfilePage
+                                    user={currentUser}
+                                    tasks={tasks}
+                                    onUpdateProfile={handleUpdateProfile}
+                                    formatDate={formatDate}
+                                    isOverdue={isOverdue}
+                                    isSidebarCollapsed={isSidebarCollapsed}
                                 />
                             ) : null}
                         </div>
@@ -2245,7 +2528,7 @@ const DashboardPage = () => {
                 </main>
             </div>
 
-            {/* Enhanced Add Task Modal */}
+            {/* Add Task Modal */}
             {showAddTaskModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                     <div
@@ -2280,7 +2563,6 @@ const DashboardPage = () => {
 
                         <div className="px-6 py-6 overflow-y-auto flex-1">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                {/* Left Column */}
                                 <div className="space-y-6">
                                     <div>
                                         <label className="block text-sm font-medium text-gray-900 mb-2">
@@ -2334,7 +2616,6 @@ const DashboardPage = () => {
                                     </div>
                                 </div>
 
-                                {/* Right Column */}
                                 <div className="space-y-6">
                                     <div>
                                         <label className="block text-sm font-medium text-gray-900 mb-2">
@@ -2484,7 +2765,7 @@ const DashboardPage = () => {
                 </div>
             )}
 
-            {/* ✅ ADD THIS: Edit Task Modal */}
+            {/* Edit Task Modal */}
             {showEditTaskModal && editingTask && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                     <div
@@ -2519,7 +2800,6 @@ const DashboardPage = () => {
 
                         <div className="px-6 py-6 overflow-y-auto flex-1">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                {/* Left Column */}
                                 <div className="space-y-6">
                                     <div>
                                         <label className="block text-sm font-medium text-gray-900 mb-2">
@@ -2588,7 +2868,6 @@ const DashboardPage = () => {
                                     </div>
                                 </div>
 
-                                {/* Right Column */}
                                 <div className="space-y-6">
                                     <div>
                                         <label className="block text-sm font-medium text-gray-900 mb-2">
@@ -2736,6 +3015,8 @@ const DashboardPage = () => {
                     </div>
                 </div>
             )}
+
+
         </div>
     );
 };

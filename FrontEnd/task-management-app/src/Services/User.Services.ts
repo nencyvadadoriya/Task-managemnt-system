@@ -3,13 +3,17 @@ import type { LoginBody, OtpverifyPayload, RegisterUserBody } from "../Types/Typ
 import toast from "react-hot-toast";
 
 class AuthServices {
-    authBaseUrl = "https://task-managemnt-backend-app.onrender.com/api/";
+    authBaseUrl = "http://localhost:9000/api/";
     authLoginUrl = "auth/login";
-    authRegigsterUrl = "auth/register";
+    authRegisterUrl = "auth/register"; // Fixed typo: regigster -> register
     authForgetPassword = "auth/forgetPassword";
     authVerifyOtp = "auth/verifyOtp";
     authGetAllUsers = "auth/getAllUsers";
     authGetCurrentUser = "auth/CurrentUser";
+    authDeleteUser = "auth/deleteUser";
+    authUpdateUser = "auth/updateUser";
+    authCreateUser = "auth/createUser";
+
     async loginUser(payload: LoginBody) {
         try {
             console.log("🔐 Login Request - Email:", payload.email);
@@ -24,32 +28,119 @@ class AuthServices {
         }
     }
 
-    async registerUser(payload: RegisterUserBody) {
+    // ✅ SINGLE method for both registration and creating new users
+    async registerOrCreateUser(payload: RegisterUserBody, isAdminCreating: boolean = false) {
         try {
-            const res = await axios.post(
-                this.authBaseUrl + this.authRegigsterUrl,
-                {
-                    name: payload.name.trim(),
-                    email: payload.email.trim().toLowerCase(),
-                    password: payload.password,
-                    role: payload.role,
+            const endpoint = isAdminCreating ? this.authCreateUser : this.authRegisterUrl;
+
+            console.log("📝 Register/Create User Request:", {
+                payload,
+                isAdminCreating,
+                endpoint
+            });
+
+            // Prepare request payload
+            const requestPayload = {
+                name: payload.name?.trim() || '',
+                email: payload.email?.trim().toLowerCase() || '',
+                password: payload.password || '',
+                role: payload.role || 'user',
+                phone: payload.phone || '',
+                department: payload.department || '',
+                position: payload.position || ''
+            };
+
+            // If admin is creating user, add token to headers
+            const config = isAdminCreating ? {
+                headers: {
+                    Authorization: `Bearer ${this.getAuthToken()}`,
+                    'Content-Type': 'application/json'
                 }
+            } : {};
+
+            const res = await axios.post(
+                this.authBaseUrl + endpoint,
+                requestPayload,
+                config
             );
 
-            return res.data;
+            console.log("✅ Register/Create User Response:", res.data);
+
+            // Robustly extract user data based on different response structures
+            // registerUser returns { result: { user: {...} } }
+            // createUser returns { data: { ... } }
+            let userData = null;
+            if (res.data.data) {
+                userData = res.data.data;
+            } else if (res.data.result && res.data.result.user) {
+                userData = res.data.result.user;
+            } else if (res.data.user) {
+                userData = res.data.user;
+            } else {
+                userData = res.data; // Fallback
+            }
+
+            // Return consistent response structure
+            return {
+                success: true,
+                message: res.data.message ||
+                    (isAdminCreating ? 'User created successfully' : 'Registration successful'),
+                data: userData
+            };
+
         } catch (error: any) {
-            const message = error.response?.data?.message || error.response?.data?.msg || "Something went wrong";
-            toast.error(message);
+            console.error("❌ Register/Create User Error:", error);
+
+            let errorMessage = isAdminCreating
+                ? 'Failed to create user'
+                : 'Registration failed';
+
+            if (error.response) {
+                // Server responded with error status
+                if (error.response.status === 401) {
+                    errorMessage = 'Unauthorized. Please login again.';
+                    if (isAdminCreating) {
+                        localStorage.removeItem('token');
+                    }
+                } else if (error.response.status === 400) {
+                    errorMessage = error.response.data?.message || 'Invalid request data';
+                } else if (error.response.status === 409) {
+                    errorMessage = 'User with this email already exists';
+                } else if (error.response.status === 422) {
+                    errorMessage = error.response.data?.message || 'Validation error';
+                } else {
+                    errorMessage = error.response.data?.message ||
+                        error.response.data?.msg ||
+                        `Server error: ${error.response.status}`;
+                }
+            } else if (error.request) {
+                errorMessage = 'No response from server. Check your connection.';
+            } else {
+                errorMessage = error.message || 'Unknown error occurred';
+            }
+
+            toast.error(errorMessage);
+
             return {
                 success: false,
                 error: true,
-                message,
+                message: errorMessage,
+                data: null
             };
         }
     }
 
+    // ✅ Alias methods for backward compatibility
+    async registerUser(payload: RegisterUserBody) {
+        return this.registerOrCreateUser(payload, false);
+    }
+
+    async createUser(payload: RegisterUserBody) {
+        return this.registerOrCreateUser(payload, true);
+    }
+
     getAuthToken() {
-        return localStorage.getItem('token')
+        return localStorage.getItem('token');
     }
 
     async getAllUsers() {
@@ -62,6 +153,96 @@ class AuthServices {
         }
     }
 
+    async deleteUser(userId: string) {
+        try {
+            const token = this.getAuthToken();
+            const res = await axios.delete(`${this.authBaseUrl}${this.authDeleteUser}/${userId}`, {
+                headers: {
+                    Authorization: token ? `Bearer ${token}` : undefined,
+                },
+            });
+            return res.data;
+        } catch (error: any) {
+            const message = error.response?.data?.message || error.response?.data?.msg || 'Failed to delete user';
+            toast.error(message);
+            return {
+                success: false,
+                error: true,
+                message,
+            };
+        }
+    }
+
+    async updateUser(userId: string, userData: any) {
+        try {
+            console.log('Updating user:', { userId, userData });
+
+            const token = this.getAuthToken();
+
+            if (!token) {
+                toast.error('Authentication token not found. Please login again.');
+                return {
+                    success: false,
+                    message: 'Authentication token not found',
+                    data: null
+                };
+            }
+
+            const res = await axios.put(
+                `${this.authBaseUrl}${this.authUpdateUser}/${userId}`,
+                userData,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                }
+            );
+
+            console.log('Update user response:', res.data);
+
+            return {
+                success: true,
+                message: res.data.message || 'User updated successfully',
+                data: res.data.user || res.data
+            };
+
+        } catch (error: any) {
+            console.error('Error updating user:', error);
+
+            let errorMessage = 'Failed to update user';
+
+            if (error.response) {
+                if (error.response.status === 401) {
+                    errorMessage = 'Unauthorized. Please login again.';
+                    localStorage.removeItem('token');
+                } else if (error.response.status === 403) {
+                    errorMessage = 'You do not have permission to update user';
+                } else if (error.response.status === 404) {
+                    errorMessage = 'User not found';
+                } else if (error.response.status === 422) {
+                    errorMessage = error.response.data.message || 'Validation error';
+                } else {
+                    errorMessage = error.response.data?.message ||
+                        error.response.data?.msg ||
+                        `Server error: ${error.response.status}`;
+                }
+            } else if (error.request) {
+                errorMessage = 'No response from server. Check your connection.';
+            } else {
+                errorMessage = error.message || 'Unknown error occurred';
+            }
+
+            toast.error(errorMessage);
+
+            return {
+                success: false,
+                message: errorMessage,
+                data: null,
+                error: true
+            };
+        }
+    }
 
     async forgetPassword(payload: any) {
         try {
@@ -86,7 +267,6 @@ class AuthServices {
         }
     }
 
-    // User.Services.ts में
     async getCurrentUser() {
         try {
             const token = localStorage.getItem('token');
@@ -113,7 +293,6 @@ class AuthServices {
                 };
             }
 
-            // Format response according to your UserType interface
             const userData = response.data.result;
 
             if (!userData) {
@@ -145,13 +324,6 @@ class AuthServices {
                 message: response.data.msg || "User fetched successfully"
             };
         } catch (error: any) {
-            // Detailed error logging
-            if (error.response) {
-                console.error('Data:', error.response.data);
-            } else {
-                console.error('Error message:', error.message);
-            }
-
             if (error.response?.status === 401) {
                 localStorage.removeItem('token');
                 localStorage.removeItem('currentUser');

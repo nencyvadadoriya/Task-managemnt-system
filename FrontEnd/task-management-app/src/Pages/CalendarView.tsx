@@ -15,6 +15,8 @@ interface CalendarViewProps {
   getAssignedUserInfo: (task: Task) => { name: string; email: string };
   formatDate: (dateString: string) => string;
   isOverdue: (dueDate: string, status: string) => boolean;
+  // Optional sidebar collapsed state from DashboardPage
+  isSidebarCollapsed?: boolean;
 }
 
 const CalendarView: React.FC<CalendarViewProps> = ({

@@ -11,6 +11,8 @@ interface NavbarProps {
   showLogout: boolean;
   setShowLogout: (show: boolean) => void;
   handleLogout: () => void;
+  // Sidebar collapsed state is passed from DashboardPage; make it optional for now
+  isSidebarCollapsed?: boolean;
 }
 
 const Navbar: React.FC<NavbarProps> = ({
