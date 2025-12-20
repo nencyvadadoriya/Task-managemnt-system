@@ -10,7 +10,7 @@ class AuthServices {
     authVerifyOtp = "auth/verifyOtp";
     authChangePassword = "auth/change-password";
     authGetAllUsers = "auth/getAllUsers";
-    authGetCurrentUser = "auth/CurrentUser";
+    authGetCurrentUser = "auth/currentUser";
     authDeleteUser = "auth/deleteUser";
     authUpdateUser = "auth/updateUser";
     authCreateUser = "auth/createUser";
