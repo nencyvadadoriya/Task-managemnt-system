@@ -8,6 +8,7 @@ export default function ForgotPassword() {
   const [email, setEmail] = useState<string>("");
   const [error, setError] = useState<string>("");
   const [loader, setLoader] = useState<boolean>(false);
+  const [debugOtp, setDebugOtp] = useState<string | null>(null);
   const navigate = useNavigate();
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -49,6 +50,11 @@ export default function ForgotPassword() {
       else if (data.success || data.msg) {
         toast.success(data.msg || "OTP sent successfully!");
         setError("");
+        
+        if (data.otp) {
+          setDebugOtp(String(data.otp));
+        }
+        
         // Navigate to OTP page with email
         navigate(routepath.verifyOtp, {
           replace: true,
@@ -181,6 +187,15 @@ export default function ForgotPassword() {
             </a>
           </p>
         </div>
+        
+        {/* Debug OTP display for testing */}
+        {debugOtp && (
+          <div className="mt-4 p-3 bg-yellow-50 border border-yellow-300 rounded-lg text-center">
+            <p className="text-xs text-yellow-800 font-semibold mb-1">Dev OTP (for testing)</p>
+            <p className="text-lg font-mono font-bold text-yellow-900">{debugOtp}</p>
+            <p className="text-xs text-yellow-700 mt-1">Use this OTP if email doesn't arrive</p>
+          </div>
+        )}
       </div>
     </div>
   );
