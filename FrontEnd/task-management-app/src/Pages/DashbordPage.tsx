@@ -370,38 +370,6 @@ const DashboardPage = () => {
         [users],
     );
 
-    const getAssignedByInfo = useCallback(
-        (task: Task): { name: string; email: string } => {
-            if (task.assignedBy) {
-                if (typeof task.assignedBy === 'object') {
-                    return {
-                        name: task.assignedBy.name || 'User',
-                        email: task.assignedBy.email,
-                    };
-                }
-
-                const user = users.find((u) => u.email === task.assignedBy);
-                if (user) {
-                    return {
-                        name: user.name || user.email.split('@')[0] || 'User',
-                        email: user.email,
-                    };
-                }
-
-                return {
-                    name: task.assignedBy.split('@')[0] || 'User',
-                    email: task.assignedBy,
-                };
-            }
-
-            return {
-                name: 'Unknown User',
-                email: 'unknown@example.com',
-            };
-        },
-        [users],
-    );
-
     const getAvailableBrands = useCallback(() => {
         const company = newTask.companyName;
         return companyBrands[company as keyof typeof companyBrands] || [];

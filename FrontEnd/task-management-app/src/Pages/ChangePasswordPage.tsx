@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { routepath } from "../Routes/route";
+import { authService } from "../Services/User.Services";
+import toast from "react-hot-toast";
 
 export default function ChangePasswordPage() {
 
@@ -39,15 +41,38 @@ export default function ChangePasswordPage() {
         setError("");
         setLoader(true);
 
-        console.log("Change Password API CALL:", {
-            email: location.state.email,
-            newPass,
-        });
+        try {
+            const email = location.state?.email;
 
-        setTimeout(() => {
-            setLoader(false);
-            navigate(routepath.login, { replace: true });
-        }, 1200);
+            const response = await authService.changePassword({
+                email,
+                newPassword: newPass,
+            });
+
+            if (!response) {
+                setError("No response from server. Please try again.");
+                toast.error("No response from server. Please try again.");
+                setLoader(false);
+                return;
+            }
+
+            if (response.error) {
+                const msg = response.msg || "Error changing password";
+                setError(msg);
+                toast.error(msg);
+            } else {
+                const msg = response.msg || "Password changed successfully";
+                toast.success(msg);
+                setError("");
+                navigate(routepath.login, { replace: true });
+            }
+
+        } catch (err) {
+            setError("Something went wrong. Please try again.");
+            toast.error("Something went wrong. Please try again.");
+        }
+
+        setLoader(false);
     };
 
 

@@ -205,7 +205,7 @@ export default function AuthPage() {
 
     const data = await authService.registerUser(signupPayload);
     if (!data.error) {
-      toast.success(data.msg || "Registration successful! Please login.");
+      toast.success("Registration successful! Please login.");
       
       // Clear form
       setSignupData({
@@ -224,7 +224,7 @@ export default function AuthPage() {
       }));
 
     } else {
-      const errorMsg = data.msg || "Registration failed";
+      const errorMsg = "Registration failed";
       setApiError(errorMsg);
       toast.error(errorMsg);
     }

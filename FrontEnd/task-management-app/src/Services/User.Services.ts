@@ -3,11 +3,12 @@ import type { LoginBody, OtpverifyPayload, RegisterUserBody } from "../Types/Typ
 import toast from "react-hot-toast";
 
 class AuthServices {
-    authBaseUrl = "http://localhost:9000/api/";
+    authBaseUrl = "https://task-managemnt-backend-app.onrender.com/api/";
     authLoginUrl = "auth/login";
     authRegisterUrl = "auth/register"; // Fixed typo: regigster -> register
     authForgetPassword = "auth/forgetPassword";
     authVerifyOtp = "auth/verifyOtp";
+    authChangePassword = "auth/change-password";
     authGetAllUsers = "auth/getAllUsers";
     authGetCurrentUser = "auth/CurrentUser";
     authDeleteUser = "auth/deleteUser";
@@ -264,6 +265,21 @@ class AuthServices {
             return res.data;
         } catch (error: any) {
             toast.error(error.response?.data?.msg || "Something went wrong");
+        }
+    }
+
+    async changePassword(payload: { email: string; newPassword: string }) {
+        try {
+            const res = await axios.post(this.authBaseUrl + this.authChangePassword, payload);
+            return res.data;
+        } catch (error: any) {
+            const message = error.response?.data?.msg || "Something went wrong";
+            toast.error(message);
+            return {
+                error: true,
+                msg: message,
+                status: error.response?.status || 500
+            };
         }
     }
 

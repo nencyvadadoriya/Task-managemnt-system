@@ -1879,8 +1879,6 @@ const CommentSidebar = memo(({
   isTaskCompleted,
   getStatusBadgeColor,
   getStatusText,
-  onDeleteComment,
-  deletingCommentId,
   loadingComments,
   loadingHistory
 }: any) => {
