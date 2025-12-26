@@ -143,11 +143,6 @@ const TaskCard: React.FC<TaskCardProps> = ({
                         </span>
                     </div>
 
-                    {/* Description */}
-                    {task.description && (
-                        <p className="text-sm text-gray-600 mb-3">{task.description}</p>
-                    )}
-
                     {/* Task Type and Company */}
                     <div className="flex flex-wrap gap-2 mb-3">
                         {task.taskType && (

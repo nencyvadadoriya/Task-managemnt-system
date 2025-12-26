@@ -55,7 +55,6 @@ import { routepath } from '../Routes/route';
 
 interface NewTaskForm {
     title: string;
-    description: string;
     assignedTo: string;
     dueDate: string;
     priority: TaskPriority;
@@ -67,7 +66,6 @@ interface NewTaskForm {
 interface EditTaskForm {
     id: string;
     title: string;
-    description: string;
     assignedTo: string;
     dueDate: string;
     priority: TaskPriority;
@@ -136,15 +134,76 @@ const DashboardPage = () => {
         lastLogin: new Date().toISOString(),
     });
 
-    const isAdmin = useMemo(() => (currentUser?.role || '').toLowerCase() === 'admin', [currentUser?.role]);
+    const normalizedRole = useMemo(() => {
+        const readRoleFromLocalStorageUser = (): string => {
+            try {
+                const raw = localStorage.getItem('currentUser');
+                if (!raw) return '';
+                const parsed = JSON.parse(raw);
+                return parsed?.role ?? parsed?.userType ?? '';
+            } catch {
+                return '';
+            }
+        };
+
+        const readRoleFromToken = (): string => {
+            try {
+                const token = localStorage.getItem('token');
+                if (!token) return '';
+                const parts = token.split('.');
+                if (parts.length < 2) return '';
+                const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+                const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
+                const payloadJson = atob(padded);
+                const payload = JSON.parse(payloadJson);
+                return payload?.role ?? '';
+            } catch {
+                return '';
+            }
+        };
+
+        const candidates = [
+            (currentUser as any)?.role,
+            (currentUser as any)?.user?.role,
+            (currentUser as any)?.result?.role,
+            readRoleFromLocalStorageUser(),
+            readRoleFromToken(),
+        ]
+            .map(v => String(v || '').toLowerCase().trim())
+            .filter(Boolean);
+
+        return candidates.find(r => r === 'admin' || r === 'manager') ?? candidates[0] ?? '';
+    }, [currentUser]);
+
+    const isAdmin = useMemo(() => normalizedRole === 'admin', [normalizedRole]);
     const isAdminOrManager = useMemo(() => {
-        const role = (currentUser?.role || '').toLowerCase();
-        return role === 'admin' || role === 'manager';
-    }, [currentUser?.role]);
+        return normalizedRole === 'admin' || normalizedRole === 'manager';
+    }, [normalizedRole]);
+
+    useEffect(() => {
+        if (!showAddTaskModal) return;
+
+        let storedRole = '';
+        try {
+            const raw = localStorage.getItem('currentUser');
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                storedRole = (parsed?.role ?? parsed?.userType ?? '').toString();
+            }
+        } catch {
+            storedRole = '';
+        }
+
+        console.log('[Create Task Modal] role debug', {
+            currentUserRole: (currentUser as any)?.role,
+            normalizedRole,
+            isAdminOrManager,
+            storedRole,
+        });
+    }, [showAddTaskModal, currentUser, normalizedRole, isAdminOrManager]);
 
     const [newTask, setNewTask] = useState<NewTaskForm>({
         title: '',
-        description: '',
         assignedTo: '',
         dueDate: '',
         priority: 'medium',
@@ -156,7 +215,6 @@ const DashboardPage = () => {
     const [editFormData, setEditFormData] = useState<EditTaskForm>({
         id: '',
         title: '',
-        description: '',
         assignedTo: '',
         dueDate: '',
         priority: 'medium',
@@ -176,6 +234,26 @@ const DashboardPage = () => {
     const [showBulkTaskTypeModal, setShowBulkTaskTypeModal] = useState(false);
     const [bulkTaskTypeNames, setBulkTaskTypeNames] = useState('');
     const [isCreatingBulkTaskTypes, setIsCreatingBulkTaskTypes] = useState(false);
+
+    useEffect(() => {
+        if (isAdmin) return;
+
+        if (showBulkBrandModal) setShowBulkBrandModal(false);
+        if (showBulkCompanyModal) setShowBulkCompanyModal(false);
+        if (showBulkTaskTypeModal) setShowBulkTaskTypeModal(false);
+    }, [isAdmin, showBulkBrandModal, showBulkCompanyModal, showBulkTaskTypeModal]);
+
+    const [showAddCompanyModal, setShowAddCompanyModal] = useState(false);
+    const [newCompanyName, setNewCompanyName] = useState('');
+    const [isCreatingCompany, setIsCreatingCompany] = useState(false);
+
+    const [showAddTaskTypeModal, setShowAddTaskTypeModal] = useState(false);
+    const [newTaskTypeName, setNewTaskTypeName] = useState('');
+    const [isCreatingTaskType, setIsCreatingTaskType] = useState(false);
+
+    const [showAddBrandModal, setShowAddBrandModal] = useState(false);
+    const [singleBrandForm, setSingleBrandForm] = useState({ company: '', name: '' });
+    const [isCreatingBrand, setIsCreatingBrand] = useState(false);
 
     const [companies, setCompanies] = useState<Company[]>([]);
     const [taskTypes, setTaskTypes] = useState<TaskTypeItem[]>([]);
@@ -340,10 +418,10 @@ const DashboardPage = () => {
 
     const canEditDeleteTask = useCallback(
         (task: Task) => {
-            if (currentUser?.role === 'admin') return true;
+            if (normalizedRole === 'admin') return true;
             return currentUser?.email ? task.assignedBy === currentUser.email : false;
         },
-        [currentUser],
+        [currentUser, normalizedRole],
     );
 
     const canMarkTaskDone = useCallback(
@@ -355,7 +433,7 @@ const DashboardPage = () => {
     );
 
     const handleUpdateUser = useCallback(async (userId: string, updatedData: Partial<UserType>) => {
-        if (currentUser?.role !== 'admin') {
+        if (normalizedRole !== 'admin') {
             throw new Error('Only administrators can edit users');
         }
 
@@ -374,10 +452,10 @@ const DashboardPage = () => {
             console.error('Error updating user:', error);
             throw error;
         }
-    }, [currentUser]);
+    }, [normalizedRole]);
 
     const handleCreateUser = useCallback(async (newUser: Partial<UserType>) => {
-        if (currentUser?.role !== 'admin') {
+        if (normalizedRole !== 'admin') {
             throw new Error('Only administrators can create users');
         }
 
@@ -403,10 +481,10 @@ const DashboardPage = () => {
             console.error('Error creating user:', error);
             throw error;
         }
-    }, [currentUser]);
+    }, [normalizedRole]);
 
     const handleDeleteUser = useCallback(async (userId: string) => {
-        if (currentUser?.role !== 'admin') {
+        if (normalizedRole !== 'admin') {
             throw new Error('Only administrators can delete users');
         }
 
@@ -427,7 +505,7 @@ const DashboardPage = () => {
             console.error('Error deleting user:', error);
             throw error;
         }
-    }, [currentUser]);
+    }, [currentUser, normalizedRole]);
 
     const getAssignedUserInfo = useCallback(
         (task: Task): { name: string; email: string } => {
@@ -572,7 +650,7 @@ const DashboardPage = () => {
                 }));
             }
             return [];
-        } catch (error: any) {
+        } catch (error) {
             console.error('Error fetching comments:', error);
             return [];
         }
@@ -863,13 +941,11 @@ const DashboardPage = () => {
             const term = searchTerm.toLowerCase();
             filtered = filtered.filter((task) => {
                 const title = (task.title || '').toLowerCase();
-                const description = (task.description || '').toLowerCase();
                 const company = (task.companyName || (task as any).company || '').toLowerCase();
                 const brand = (task.brand || '').toLowerCase();
                 const typeVal = (task.taskType || (task as any).type || '').toLowerCase();
                 return (
                     title.includes(term) ||
-                    description.includes(term) ||
                     company.includes(term) ||
                     brand.includes(term) ||
                     typeVal.includes(term)
@@ -1303,7 +1379,6 @@ const DashboardPage = () => {
         setEditFormData({
             id: task.id,
             title: task.title || '',
-            description: task.description || '',
             assignedTo: getAssignedToValue(task.assignedTo),
             dueDate: dueDate,
             priority: task.priority || 'medium',
@@ -1334,7 +1409,6 @@ const DashboardPage = () => {
 
             const taskData = {
                 title: newTask.title,
-                description: newTask.description,
                 assignedTo: newTask.assignedTo,
                 dueDate: newTask.dueDate,
                 priority: newTask.priority === 'urgent' ? 'high' : newTask.priority,
@@ -1353,7 +1427,6 @@ const DashboardPage = () => {
                 setShowAddTaskModal(false);
                 setNewTask({
                     title: '',
-                    description: '',
                     assignedTo: '',
                     dueDate: '',
                     priority: 'medium',
@@ -1393,7 +1466,6 @@ const DashboardPage = () => {
 
                     const taskData = {
                         title: payload.title,
-                        description: payload.description || '',
                         assignedTo: payload.assignedTo,
                         dueDate: payload.dueDate,
                         priority: payload.priority === 'urgent' ? 'high' : payload.priority,
@@ -1454,7 +1526,6 @@ const DashboardPage = () => {
 
             const updateData = {
                 title: editFormData.title,
-                description: editFormData.description,
                 assignedTo: editFormData.assignedTo,
                 dueDate: editFormData.dueDate,
                 priority: editFormData.priority,
@@ -1646,7 +1717,7 @@ const DashboardPage = () => {
                             <div className="h-10 w-10 bg-gray-300 rounded-full"></div>
                             <div className="flex-1">
                                 <div className="h-4 w-24 bg-gray-400 rounded mb-2"></div>
-                                <div className="h-3 w-16 bg-gray-300 rounded"></div>
+                                <div className="h-8 w-16 bg-gray-300 rounded"></div>
                             </div>
                         </div>
                     </div>
@@ -2058,9 +2129,6 @@ const DashboardPage = () => {
                                                                         </span>
                                                                     )}
                                                                 </h3>
-                                                                <p className="text-sm text-gray-500 line-clamp-2 mb-3">
-                                                                    {task.description || 'No description provided'}
-                                                                </p>
                                                             </div>
                                                             <button
                                                                 onClick={() => setOpenMenuId(openMenuId === task.id ? null : task.id)}
@@ -2203,11 +2271,17 @@ const DashboardPage = () => {
                                                         <div className="flex items-center justify-between">
                                                             <div className="flex items-center space-x-4">
                                                                 <div className="flex items-center space-x-2">
-                                                                    <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(task.status)}`}>
-                                                                        {task.status}
+                                                                    <span className={`px-2 py-1 text-xs font-medium rounded-full border ${getPriorityColor(task.priority || 'medium')}`}>
+                                                                        <span className="flex items-center gap-1">
+                                                                            <Flag className="h-3 w-3" />
+                                                                            {task.priority}
+                                                                        </span>
                                                                     </span>
-                                                                    <span className={`px-2 py-1 text-xs font-medium rounded-full ${getPriorityColor(task.priority || 'medium')}`}>
-                                                                        {task.priority}
+                                                                    <span className={`px-2 py-1 text-xs font-medium rounded-full border ${getStatusColor(task.status)}`}>
+                                                                        {task.status}
+                                                                        {task.completedApproval && (
+                                                                            <span className="ml-1 text-blue-500">By Admin</span>
+                                                                        )}
                                                                     </span>
                                                                 </div>
                                                                 <div>
@@ -2215,15 +2289,12 @@ const DashboardPage = () => {
                                                                     <p className="text-sm text-gray-500">{getAssignedUserInfo(task).name}</p>
                                                                 </div>
                                                             </div>
-                                                            <div className="flex items-center space-x-4">
-                                                                <span className="text-sm text-gray-500">{formatDate(task.dueDate)}</span>
-                                                                <button
-                                                                    onClick={() => handleOpenEditModal(task)}
-                                                                    className="p-1 text-gray-400 hover:text-gray-600"
-                                                                >
-                                                                    <Edit className="h-4 w-4" />
-                                                                </button>
-                                                            </div>
+                                                            <button
+                                                                onClick={() => handleOpenEditModal(task)}
+                                                                className="p-1 text-gray-400 hover:text-gray-600"
+                                                            >
+                                                                <Edit className="h-4 w-4" />
+                                                            </button>
                                                         </div>
                                                     </div>
                                                 ))}
@@ -2367,7 +2438,7 @@ const DashboardPage = () => {
                         onClick={() => setShowAddTaskModal(false)}
                     />
 
-                    <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+                    <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
                         <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-6 py-5">
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
@@ -2399,6 +2470,7 @@ const DashboardPage = () => {
                                         <label className="block text-sm font-medium text-gray-900 mb-2">
                                             Task Title *
                                         </label>
+
                                         <input
                                             type="text"
                                             placeholder="What needs to be done?"
@@ -2414,20 +2486,9 @@ const DashboardPage = () => {
 
                                     <div>
                                         <label className="block text-sm font-medium text-gray-900 mb-2">
-                                            Description
-                                        </label>
-                                        <textarea
-                                            placeholder="Describe the task in detail..."
-                                            className="w-full px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[120px]"
-                                            value={newTask.description}
-                                            onChange={e => handleInputChange('description', e.target.value)}
-                                        />
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-900 mb-2">
                                             Assign To *
                                         </label>
+
                                         <select
                                             value={newTask.assignedTo}
                                             onChange={e => handleInputChange('assignedTo', e.target.value)}
@@ -2502,14 +2563,26 @@ const DashboardPage = () => {
                                                     Task Type
                                                 </label>
                                                 {isAdminOrManager && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setShowBulkTaskTypeModal(true)}
-                                                        className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 transition-colors"
-                                                    >
-                                                        <PlusCircle className="h-3 w-3" />
-                                                        Add Types
-                                                    </button>
+                                                    <div className="flex items-center gap-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setShowAddTaskTypeModal(true)}
+                                                            className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 transition-colors"
+                                                        >
+                                                            <PlusCircle className="h-3 w-3" />
+                                                            Add Type
+                                                        </button>
+                                                        {isAdmin && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setShowBulkTaskTypeModal(true)}
+                                                                className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 transition-colors"
+                                                            >
+                                                                <PlusCircle className="h-3 w-3" />
+                                                                Bulk Add
+                                                            </button>
+                                                        )}
+                                                    </div>
                                                 )}
                                             </div>
                                             <select
@@ -2553,12 +2626,22 @@ const DashboardPage = () => {
                                                     <>
                                                         <button
                                                             type="button"
-                                                            onClick={() => setShowBulkCompanyModal(true)}
+                                                            onClick={() => setShowAddCompanyModal(true)}
                                                             className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
                                                         >
                                                             <PlusCircle className="h-3 w-3" />
-                                                            Bulk Add
+                                                            Add
                                                         </button>
+                                                        {isAdmin && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setShowBulkCompanyModal(true)}
+                                                                className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+                                                            >
+                                                                <PlusCircle className="h-3 w-3" />
+                                                                Bulk Add
+                                                            </button>
+                                                        )}
                                                     </>
                                                 )}
                                             </div>
@@ -2602,14 +2685,32 @@ const DashboardPage = () => {
                                                 Brand *
                                             </label>
                                             {isAdminOrManager && (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setShowBulkBrandModal(true)}
-                                                    className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
-                                                >
-                                                    <PlusCircle className="h-3 w-3" />
-                                                    Bulk Add Brands
-                                                </button>
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setSingleBrandForm({ company: newTask.companyName || '', name: '' });
+                                                            setShowAddBrandModal(true);
+                                                        }}
+                                                        className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+                                                    >
+                                                        <PlusCircle className="h-3 w-3" />
+                                                        Add Brand
+                                                    </button>
+                                                    {isAdmin && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setBulkBrandForm(prev => ({ ...prev, company: newTask.companyName || prev.company }));
+                                                                setShowBulkBrandModal(true);
+                                                            }}
+                                                            className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+                                                        >
+                                                            <PlusCircle className="h-3 w-3" />
+                                                            Bulk Add
+                                                        </button>
+                                                    )}
+                                                </div>
                                             )}
                                         </div>
 
@@ -2694,255 +2795,8 @@ const DashboardPage = () => {
                 </div>
             )}
 
-            {/* Edit Task Modal */}
-            {showEditTaskModal && editingTask && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                    <div
-                        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-                        onClick={() => setShowEditTaskModal(false)}
-                    />
-
-                    <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
-                        <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-6 py-5">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <div className="p-2 bg-white/20 rounded-xl">
-                                        <Edit className="h-6 w-6 text-white" />
-                                    </div>
-                                    <div>
-                                        <h3 className="text-xl font-semibold text-white">
-                                            Edit Task
-                                        </h3>
-                                        <p className="text-sm text-blue-100 mt-0.5">
-                                            Update task details below
-                                        </p>
-                                    </div>
-                                </div>
-                                <button
-                                    onClick={() => setShowEditTaskModal(false)}
-                                    className="p-1.5 text-white hover:bg-white/20 rounded-lg"
-                                >
-                                    <X className="h-5 w-5" />
-                                </button>
-                            </div>
-                        </div>
-
-                        <div className="px-6 py-6 overflow-y-auto flex-1">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div className="space-y-6">
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-900 mb-2">
-                                            Task Title *
-                                        </label>
-                                        <input
-                                            type="text"
-                                            placeholder="What needs to be done?"
-                                            className={`w-full px-4 py-3 text-sm border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.title ? 'border-red-500' : 'border-gray-300'
-                                                }`}
-                                            value={editFormData.title}
-                                            onChange={e => handleEditInputChange('title', e.target.value)}
-                                        />
-                                        {editFormErrors.title && (
-                                            <p className="mt-1 text-sm text-red-600">{editFormErrors.title}</p>
-                                        )}
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-900 mb-2">
-                                            Description
-                                        </label>
-                                        <textarea
-                                            placeholder="Describe the task in detail..."
-                                            className="w-full px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[120px]"
-                                            value={editFormData.description}
-                                            onChange={e => handleEditInputChange('description', e.target.value)}
-                                        />
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-900 mb-2">
-                                            Assign To *
-                                        </label>
-                                        <select
-                                            value={editFormData.assignedTo}
-                                            onChange={e => handleEditInputChange('assignedTo', e.target.value)}
-                                            className={`w-full px-4 py-3 text-sm border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.assignedTo ? 'border-red-500' : 'border-gray-300'
-                                                }`}
-                                        >
-                                            <option value="">Select team member</option>
-                                            {users.map(user => (
-                                                <option key={user.id} value={user.email}>
-                                                    {user.name} ({user.email})
-                                                </option>
-                                            ))}
-                                        </select>
-                                        {editFormErrors.assignedTo && (
-                                            <p className="mt-1 text-sm text-red-600">{editFormErrors.assignedTo}</p>
-                                        )}
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-900 mb-2">
-                                            Status
-                                        </label>
-                                        <select
-                                            value={editFormData.status}
-                                            onChange={e => handleEditInputChange('status', e.target.value as TaskStatus)}
-                                            className="w-full px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                        >
-                                            <option value="pending">Pending</option>
-                                            <option value="in-progress">In Progress</option>
-                                            <option value="completed">Completed</option>
-                                        </select>
-                                    </div>
-                                </div>
-
-                                <div className="space-y-6">
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-900 mb-2">
-                                            Due Date *
-                                        </label>
-                                        <input
-                                            type="date"
-                                            className={`w-full px-4 py-3 text-sm border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.dueDate ? 'border-red-500' : 'border-gray-300'
-                                                }`}
-                                            value={editFormData.dueDate}
-                                            onChange={e => handleEditInputChange('dueDate', e.target.value)}
-                                        />
-                                        {editFormErrors.dueDate && (
-                                            <p className="mt-1 text-sm text-red-600">{editFormErrors.dueDate}</p>
-                                        )}
-                                    </div>
-
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-900 mb-2">
-                                                Priority
-                                            </label>
-                                            <div className="grid grid-cols-3 gap-2">
-                                                {['low', 'medium', 'high'].map((priority) => (
-                                                    <button
-                                                        key={priority}
-                                                        type="button"
-                                                        onClick={() => handleEditInputChange('priority', priority as TaskPriority)}
-                                                        className={`py-2.5 text-xs font-medium rounded-lg border ${editFormData.priority === priority
-                                                            ? priority === 'high'
-                                                                ? 'bg-rose-100 text-rose-700 border-rose-300'
-                                                                : priority === 'medium'
-                                                                    ? 'bg-amber-100 text-amber-700 border-amber-300'
-                                                                    : 'bg-blue-100 text-blue-700 border-blue-300'
-                                                            : 'bg-gray-100 text-gray-600 border-gray-300'
-                                                            }`}
-                                                    >
-                                                        {priority.charAt(0).toUpperCase() + priority.slice(1)}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-900 mb-2">
-                                                Task Type
-                                            </label>
-                                            <select
-                                                className="w-full px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                                value={editFormData.taskType}
-                                                onChange={e => handleEditInputChange('taskType', e.target.value)}
-                                            >
-                                                {availableTaskTypes.map((typeName) => (
-                                                    <option key={typeName} value={typeName.toLowerCase()}>
-                                                        {typeName}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                    </div>
-
-                                    {/* Company */}
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-900 mb-2">
-                                            Company
-                                        </label>
-                                        <select
-                                            value={editFormData.companyName}
-                                            onChange={e => handleEditInputChange('companyName', e.target.value)}
-                                            className="w-full px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                        >
-                                            <option value="">Select a company</option>
-                                            {availableCompanies.map(company => (
-                                                <option key={company} value={company}>
-                                                    {company}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </div>
-
-                                    {/* Brand */}
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-900 mb-2">
-                                            Brand
-                                        </label>
-                                        <select
-                                            className="w-full px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                            value={editFormData.brand}
-                                            onChange={e => handleEditInputChange('brand', e.target.value)}
-                                            disabled={!editFormData.companyName}
-                                        >
-                                            <option value="">Select a brand</option>
-                                            {getEditFormAvailableBrands().map((brand) => (
-                                                <option key={brand} value={brand}>
-                                                    {brand}
-                                                </option>
-                                            ))}
-                                        </select>
-                                        {!editFormData.companyName && (
-                                            <p className="mt-1 text-xs text-gray-500">
-                                                Select a company first to see available brands
-                                            </p>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="px-6 py-5 bg-gray-50 border-t border-gray-200">
-                            <div className="flex justify-end gap-3">
-                                <button
-                                    type="button"
-                                    onClick={() => setShowEditTaskModal(false)}
-                                    className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={handleSaveEditedTask}
-                                    disabled={isUpdatingTask}
-                                    className={`px-5 py-2.5 text-sm font-medium text-white rounded-xl ${isUpdatingTask
-                                        ? 'bg-blue-400 cursor-not-allowed'
-                                        : 'bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700'
-                                        }`}
-                                >
-                                    {isUpdatingTask ? (
-                                        <span className="flex items-center gap-2">
-                                            <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
-                                            Updating Task...
-                                        </span>
-                                    ) : (
-                                        <span className="flex items-center gap-2">
-                                            <Edit className="h-4 w-4" />
-                                            Update Task
-                                        </span>
-                                    )}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
             {/* Bulk Add Brands Modal */}
-            {showBulkBrandModal && (
+            {isAdmin && showBulkBrandModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                     <div
                         className="absolute inset-0 bg-black/50 backdrop-blur-sm"
@@ -3117,7 +2971,7 @@ const DashboardPage = () => {
             )}
 
             {/* Bulk Add Companies Modal */}
-            {showBulkCompanyModal && (
+            {isAdmin && showBulkCompanyModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                     <div
                         className="absolute inset-0 bg-black/50 backdrop-blur-sm"
@@ -3238,7 +3092,7 @@ const DashboardPage = () => {
             )}
 
             {/* Bulk Add Task Types Modal */}
-            {showBulkTaskTypeModal && (
+            {isAdmin && showBulkTaskTypeModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                     <div
                         className="absolute inset-0 bg-black/50 backdrop-blur-sm"
@@ -3351,6 +3205,336 @@ const DashboardPage = () => {
                                             Add Types
                                         </span>
                                     )}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Add Company Modal */}
+            {showAddCompanyModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div
+                        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+                        onClick={() => setShowAddCompanyModal(false)}
+                    />
+
+                    <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
+                        <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-6 py-5">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-white/20 rounded-xl">
+                                        <Building className="h-6 w-6 text-white" />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-xl font-semibold text-white">
+                                            Add Company
+                                        </h3>
+                                        <p className="text-sm text-blue-100 mt-0.5">
+                                            Add one company
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setShowAddCompanyModal(false)}
+                                    className="p-1.5 text-white hover:bg-white/20 rounded-lg"
+                                >
+                                    <X className="h-5 w-5" />
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="px-6 py-6 overflow-y-auto flex-1">
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-900 mb-2">
+                                        Company Name *
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={newCompanyName}
+                                        onChange={(e) => setNewCompanyName(e.target.value)}
+                                        className="w-full px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        placeholder="Enter company name"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="px-6 py-5 bg-gray-50 border-t border-gray-200">
+                            <div className="flex justify-end gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowAddCompanyModal(false)}
+                                    className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={async () => {
+                                        const name = (newCompanyName || '').toString().trim();
+                                        if (!name) {
+                                            toast.error('Please enter a company name');
+                                            return;
+                                        }
+                                        setIsCreatingCompany(true);
+                                        try {
+                                            const res = await companyService.createCompany({ name });
+                                            if (res.success && res.data) {
+                                                await fetchCompanies();
+                                                setNewCompanyName('');
+                                                setShowAddCompanyModal(false);
+                                                toast.success('Company added successfully!');
+                                            } else {
+                                                toast.error('Failed to add company');
+                                            }
+                                        } catch (err) {
+                                            console.error('Error creating company:', err);
+                                            toast.error('Failed to add company');
+                                        } finally {
+                                            setIsCreatingCompany(false);
+                                        }
+                                    }}
+                                    disabled={isCreatingCompany}
+                                    className={`px-5 py-2.5 text-sm font-medium text-white rounded-xl ${isCreatingCompany
+                                        ? 'bg-blue-400 cursor-not-allowed'
+                                        : 'bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700'
+                                        }`}
+                                >
+                                    {isCreatingCompany ? 'Adding...' : 'Add Company'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Add Task Type Modal */}
+            {showAddTaskTypeModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div
+                        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+                        onClick={() => setShowAddTaskTypeModal(false)}
+                    />
+
+                    <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
+                        <div className="bg-gradient-to-r from-indigo-500 to-indigo-600 px-6 py-5">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-white/20 rounded-xl">
+                                        <Tag className="h-6 w-6 text-white" />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-xl font-semibold text-white">
+                                            Add Task Type
+                                        </h3>
+                                        <p className="text-sm text-indigo-100 mt-0.5">
+                                            Add one task type
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setShowAddTaskTypeModal(false)}
+                                    className="p-1.5 text-white hover:bg-white/20 rounded-lg"
+                                >
+                                    <X className="h-5 w-5" />
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="px-6 py-6 overflow-y-auto flex-1">
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-900 mb-2">
+                                        Task Type *
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={newTaskTypeName}
+                                        onChange={(e) => setNewTaskTypeName(e.target.value)}
+                                        className="w-full px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                        placeholder="Enter task type"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="px-6 py-5 bg-gray-50 border-t border-gray-200">
+                            <div className="flex justify-end gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowAddTaskTypeModal(false)}
+                                    className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={async () => {
+                                        const name = (newTaskTypeName || '').toString().trim();
+                                        if (!name) {
+                                            toast.error('Please enter a task type');
+                                            return;
+                                        }
+                                        setIsCreatingTaskType(true);
+                                        try {
+                                            const res = await taskTypeService.createTaskType({ name });
+                                            if (res.success && res.data) {
+                                                await fetchTaskTypes();
+                                                setNewTaskTypeName('');
+                                                setShowAddTaskTypeModal(false);
+                                                toast.success('Task type added successfully!');
+                                            } else {
+                                                toast.error('Failed to add task type');
+                                            }
+                                        } catch (err) {
+                                            console.error('Error creating task type:', err);
+                                            toast.error('Failed to add task type');
+                                        } finally {
+                                            setIsCreatingTaskType(false);
+                                        }
+                                    }}
+                                    disabled={isCreatingTaskType}
+                                    className={`px-5 py-2.5 text-sm font-medium text-white rounded-xl ${isCreatingTaskType
+                                        ? 'bg-indigo-400 cursor-not-allowed'
+                                        : 'bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700'
+                                        }`}
+                                >
+                                    {isCreatingTaskType ? 'Adding...' : 'Add Type'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Add Brand Modal */}
+            {showAddBrandModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div
+                        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+                        onClick={() => setShowAddBrandModal(false)}
+                    />
+
+                    <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
+                        <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 px-6 py-5">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-white/20 rounded-xl">
+                                        <Tag className="h-6 w-6 text-white" />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-xl font-semibold text-white">
+                                            Add Brand
+                                        </h3>
+                                        <p className="text-sm text-emerald-100 mt-0.5">
+                                            Add one brand for a company
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setShowAddBrandModal(false)}
+                                    className="p-1.5 text-white hover:bg-white/20 rounded-lg"
+                                >
+                                    <X className="h-5 w-5" />
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="px-6 py-6 overflow-y-auto flex-1">
+                            <div className="space-y-6">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-900 mb-2">
+                                        Company *
+                                    </label>
+                                    <select
+                                        value={singleBrandForm.company}
+                                        onChange={(e) => setSingleBrandForm(prev => ({ ...prev, company: e.target.value }))}
+                                        className="w-full px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                    >
+                                        <option value="">Select a company</option>
+                                        {availableCompanies.map(company => (
+                                            <option key={company} value={company}>
+                                                {company}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-900 mb-2">
+                                        Brand Name *
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={singleBrandForm.name}
+                                        onChange={(e) => setSingleBrandForm(prev => ({ ...prev, name: e.target.value }))}
+                                        className="w-full px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                        placeholder="Enter brand name"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="px-6 py-5 bg-gray-50 border-t border-gray-200">
+                            <div className="flex justify-end gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowAddBrandModal(false)}
+                                    className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={async () => {
+                                        const company = (singleBrandForm.company || '').toString().trim();
+                                        const name = (singleBrandForm.name || '').toString().trim();
+
+                                        if (!company) {
+                                            toast.error('Please select a company');
+                                            return;
+                                        }
+                                        if (!name) {
+                                            toast.error('Please enter a brand name');
+                                            return;
+                                        }
+
+                                        setIsCreatingBrand(true);
+                                        try {
+                                            const res = await brandService.createBrand({
+                                                name,
+                                                company,
+                                                description: '',
+                                                status: 'active',
+                                            });
+                                            if (res.success && res.data) {
+                                                setApiBrands(prev => [...prev, res.data]);
+                                                setShowAddBrandModal(false);
+                                                setSingleBrandForm({ company: '', name: '' });
+                                                const event = new CustomEvent('brandUpdated', { detail: { brands: [res.data] } });
+                                                window.dispatchEvent(event);
+                                                await fetchBrands();
+                                                toast.success('Brand added successfully!');
+                                            } else {
+                                                toast.error('Failed to add brand');
+                                            }
+                                        } catch (err) {
+                                            console.error('Error creating brand:', err);
+                                            toast.error('Failed to add brand');
+                                        } finally {
+                                            setIsCreatingBrand(false);
+                                        }
+                                    }}
+                                    disabled={isCreatingBrand}
+                                    className={`px-5 py-2.5 text-sm font-medium text-white rounded-xl ${isCreatingBrand
+                                        ? 'bg-emerald-400 cursor-not-allowed'
+                                        : 'bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700'
+                                        }`}
+                                >
+                                    {isCreatingBrand ? 'Adding...' : 'Add Brand'}
                                 </button>
                             </div>
                         </div>

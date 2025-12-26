@@ -83,7 +83,6 @@ interface AllTasksPageProps {
   editingTask?: Task | null;
   onOpenEditModal?: (task: Task) => void;
   onCloseEditModal?: () => void;
-  onSaveEditedTask?: () => Promise<void>;
   getBrandsByCompany?: (companyName: string) => string[];
 }
 
@@ -91,7 +90,6 @@ type BulkPriority = 'low' | 'medium' | 'high' | 'urgent';
 
 interface BulkTaskPayload {
   title: string;
-  description?: string;
   assignedTo: string;
   dueDate: string;
   priority: BulkPriority;
@@ -108,25 +106,10 @@ interface BulkCreateFailure {
   reason: string;
 }
 
-interface BulkCreateResult {
-  created: Task[];
-  failures: BulkCreateFailure[];
-}
-
-interface BulkImportDefaults {
-  assigner: string;
-  dueDate: string;
-  priority: BulkPriority;
-  taskType: string;
-  companyName: string;
-  brand: string;
-}
-
 interface BulkTaskDraft {
   id: string;
   rowNumber: number;
   title: string;
-  description: string;
   assigner: string;
   dueDate: string;
   priority: BulkPriority | '';
@@ -533,7 +516,6 @@ const BulkImporter = memo(({
         id: draftId,
         rowNumber: draftTasks.length + index + 1,
         title,
-        description: '', // Empty description - user will fill
         assigner: defaults.assigner,
         dueDate: defaults.dueDate,
         priority: defaults.priority,
@@ -934,7 +916,6 @@ Add user notifications
                     <tr className="text-xs uppercase tracking-wide text-gray-500">
                       <th className="px-4 py-3 text-left w-16">#</th>
                       <th className="px-4 py-3 text-left">Task Title *</th>
-                      <th className="px-4 py-3 text-left">Description</th>
                       <th className="px-4 py-3 text-left w-48">Assigner *</th>
                       <th className="px-4 py-3 text-left w-48">Company & Brand</th>
                       <th className="px-4 py-3 text-left w-36">Due Date</th>
@@ -962,16 +943,6 @@ Add user notifications
                               onChange={(e) => handleFieldChange(draft.id, 'title', e.target.value)}
                               className={`w-full px-3 py-2 border ${draft.errors.some(e => e.includes('Title')) ? 'border-red-300' : 'border-gray-200'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm`}
                               placeholder="Enter task title"
-                            />
-                          </td>
-
-                          <td className="px-4 py-3">
-                            <textarea
-                              value={draft.description}
-                              onChange={(e) => handleFieldChange(draft.id, 'description', e.target.value)}
-                              className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm min-h-[60px]"
-                              placeholder="Enter task description (optional)"
-                              rows={2}
                             />
                           </td>
 
@@ -1018,7 +989,9 @@ Add user notifications
                                 <option value="">Select brand</option>
                                 {draftCompanyBrands.map(brand => (
                                   <option key={brand} value={brand}>
-                                    {brand.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
+                                    {brand.split(' ').map(word =>
+                                      word.charAt(0).toUpperCase() + word.slice(1)
+                                    ).join(' ')}
                                   </option>
                                 ))}
                               </select>
@@ -1780,6 +1753,7 @@ const DesktopTaskItem = memo(({
                   ) : (
                     <Eye className="h-4 w-4 text-blue-500" />
                   )}
+                  {isPermanentlyApproved ? 'Remove Permanent Approval' : 'Permanently Approve'}
                 </button>
               )}
             </div>
@@ -1824,7 +1798,7 @@ const CommentSidebar = memo(({
       <div className="absolute inset-0 bg-black/20 backdrop-blur-sm"
         onClick={onCloseSidebar}
       />
-      <div className="absolute inset-y-0 right-0">
+      <div className="absolute inset-0 right-0">
         <div className="h-full bg-white shadow-xl overflow-y-auto w-full md:w-[500px] transform transition-transform duration-300 ease-in-out">
           {/* Sidebar Header */}
           <div className="sticky top-0 bg-white border-b z-10">
@@ -1890,7 +1864,7 @@ const CommentSidebar = memo(({
                         <div className="font-medium text-gray-900 truncate">
                           {userInfo.name}
                         </div>
-                        <div className="text-gray-600 text-xs truncate">
+                        <div className="text-xs text-gray-500 mt-1">
                           {userInfo.email}
                         </div>
                       </div>
@@ -2236,7 +2210,7 @@ const PermanentHistoryTimeline = memo(({
               <div className="flex items-center gap-2 mb-2 flex-wrap">
                 <div className="text-sm font-medium text-gray-900">
                   {isComment
-                    ? (item.data as CommentType).userName
+                    ? (item.data as CommentType).userName 
                     : (item.data as TaskHistory).userName }
                 </div>
                 <div className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-700">
@@ -3175,7 +3149,6 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
       // Convert assigner back to assignedTo for API
       const payloads: BulkTaskPayload[] = validatedDrafts.map(draft => ({
         title: draft.title,
-        description: draft.description || undefined,
         assignedTo: draft.assigner, // Map assigner to assignedTo
         dueDate: draft.dueDate,
         priority: (draft.priority || bulkImportDefaults.priority) as BulkPriority,
@@ -3922,14 +3895,13 @@ const AllTasksPage: React.FC<AllTasksPageProps> = ({
       if (searchTerm) {
         const searchLower = searchTerm.toLowerCase();
         const matchesTitle = task.title?.toLowerCase().includes(searchLower);
-        const matchesDescription = task.description?.toLowerCase().includes(searchLower);
         const matchesAssignee = getEmailByIdInternal(task.assignedTo)?.toLowerCase().includes(searchLower);
         const matchesAssigner = getAssignerEmail(task)?.toLowerCase().includes(searchLower);
         const matchesType = task.type?.toLowerCase().includes(searchLower) || false;
         const matchesCompany = task.company?.toLowerCase().includes(searchLower) || false;
         const matchesBrand = task.brand?.toLowerCase().includes(searchLower) || false;
 
-        if (!matchesTitle && !matchesDescription && !matchesAssignee && !matchesAssigner &&
+        if (!matchesTitle && !matchesAssignee && !matchesAssigner &&
           !matchesType && !matchesCompany && !matchesBrand) {
           return false;
         }

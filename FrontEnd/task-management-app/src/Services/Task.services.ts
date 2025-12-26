@@ -1,27 +1,11 @@
 // TaskService.ts
 
-import axios from "axios";
-
-// 💡 FIX 1: Create a function to get the authentication headers
-const getAuthHeaders = () => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-        console.error("JWT Token is missing from localStorage.");
-        return {};
-    }
-    return {
-        headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-        }
-    };
-};
+import apiClient from "./apiClient";
 
 class TaskService {
-    baseUrl = "http://localhost:9000/api/task/";
+    baseUrl = "/task/";
     authAddTask = "addTask";
     authGetAllTask = "getAllTasks";
-    authSingleTask = "singleTask";
     authUpdateTask = "updateTask";
     authDeletedTask = "deleteTask";
 
@@ -37,16 +21,11 @@ class TaskService {
         return `${this.baseUrl}${taskId}/history`;
     }
 
-    // 🎯 FIX 2: Add Task method now includes the Authorization Header
     async addTask(payload: any) {
         try {
             console.log('📤 Sending task to API:', payload);
 
-            const res = await axios.post(
-                this.baseUrl + this.authAddTask,
-                payload,
-                getAuthHeaders() // 🔑 AUTH HEADER ADDED
-            );
+            const res = await apiClient.post(this.baseUrl + this.authAddTask, payload);
 
             console.log('📥 API Response:', res.data);
 
@@ -68,13 +47,9 @@ class TaskService {
         }
     }
 
-    // 🎯 FIX 3: Get All Tasks method now includes the Authorization Header
     async getAllTasks() {
         try {
-            const res = await axios.get(
-                this.baseUrl + this.authGetAllTask,
-                getAuthHeaders() // 🔑 AUTH HEADER ADDED
-            );
+            const res = await apiClient.get(this.baseUrl + this.authGetAllTask);
 
             const tasks = (res.data.data || []).map((task: any) => ({
                 ...task,
@@ -98,31 +73,11 @@ class TaskService {
         }
     }
 
-    // 🎯 FIX 4: Get Single Task method now includes the Authorization Header
-    async getSingleTask(id: string) {
-        try {
-            const res = await axios.get(
-                this.baseUrl + this.authSingleTask + `/${id}`,
-                getAuthHeaders() // 🔑 AUTH HEADER ADDED
-            );
-
-            return res.data;
-        } catch (err) {
-            console.log("Single Task Error:", err);
-            throw err;
-        }
-    }
-
-    // 🎯 FIX 5: Update Task method now includes the Authorization Header
     async updateTask(id: string, payload: any) {
         try {
             console.log('📝 Updating task:', id, payload);
 
-            const res = await axios.put(
-                this.baseUrl + this.authUpdateTask + `/${id}`,
-                payload,
-                getAuthHeaders() // 🔑 AUTH HEADER ADDED
-            );
+            const res = await apiClient.put(this.baseUrl + this.authUpdateTask + `/${id}`, payload);
 
             console.log('✅ Update response:', res.data);
 
@@ -144,15 +99,11 @@ class TaskService {
         }
     }
 
-    // 🎯 FIX 6: Delete Task logic is already correct, but using the common function for consistency
     async deleteTask(id: string) {
         try {
             console.log('Sending DELETE request for task ID:', id);
 
-            const res = await axios.delete(
-                this.baseUrl + this.authDeletedTask + `/${id}`,
-                getAuthHeaders() // 🔑 Using common function now
-            );
+            const res = await apiClient.delete(this.baseUrl + this.authDeletedTask + `/${id}`);
 
             console.log(' DELETE Response:', res.data);
 
@@ -176,7 +127,6 @@ class TaskService {
         return this.addTask(payload);
     }
 
-    // ✅ CORRECTED: Add Comment method - सिर्फ content लेगा, user info backend से token से मिलेगी
     async addComment(taskId: string, content: string) {
         try {
             console.log('💾 Adding comment for task:', taskId, content);
@@ -186,11 +136,7 @@ class TaskService {
                 // User info backend में token से automatic add होगी
             };
 
-            const res = await axios.post(
-                this.buildCommentsUrl(taskId),
-                payload,
-                getAuthHeaders()
-            );
+            const res = await apiClient.post(this.buildCommentsUrl(taskId), payload);
 
             console.log('✅ Comment add response:', res.data);
 
@@ -209,13 +155,9 @@ class TaskService {
         }
     }
 
-    // ✅ CORRECTED: Fetch Comments method
     async fetchComments(taskId: string) {
         try {
-            const res = await axios.get(
-                this.buildCommentsUrl(taskId),
-                getAuthHeaders()
-            );
+            const res = await apiClient.get(this.buildCommentsUrl(taskId));
 
             console.log('✅ Comments fetch response:', res.data);
 
@@ -234,15 +176,11 @@ class TaskService {
         }
     }
 
-    // ✅ CORRECTED: Delete Comment method
     async deleteComment(taskId: string, commentId: string) {
         try {
             console.log('🗑️ Deleting comment:', commentId, 'for task:', taskId);
 
-            const res = await axios.delete(
-                this.buildCommentsUrl(taskId, commentId),
-                getAuthHeaders()
-            );
+            const res = await apiClient.delete(this.buildCommentsUrl(taskId, commentId));
 
             console.log('✅ Comment delete response:', res.data);
 
@@ -259,45 +197,10 @@ class TaskService {
         }
     }
 
-    // ✅ NEW: Update Task Approval Status
-    async updateTaskApproval(taskId: string, completedApproval: boolean) {
-        try {
-            console.log('✅ Updating task approval:', taskId, completedApproval);
-
-            const payload = {
-                completedApproval: completedApproval
-            };
-
-            const res = await axios.put(
-                this.baseUrl + this.authUpdateTask + `/${taskId}`,
-                payload,
-                getAuthHeaders()
-            );
-
-            console.log('✅ Approval update response:', res.data);
-
-            return {
-                success: Boolean(res.data.success),
-                data: res.data.data,
-                message: res.data.message || res.data.msg || 'Approval status updated'
-            };
-        } catch (error: any) {
-            console.error('❌ Error updating approval:', error);
-            return {
-                success: false,
-                message: error.response?.data?.msg || 'Failed to update approval'
-            };
-        }
-    }
-
-    // ✅ NEW: Get Task History
     async getTaskHistory(taskId: string) {
         try {
             console.log('📜 Fetching history for task:', taskId);
-            const res = await axios.get(
-                this.buildHistoryUrl(taskId),
-                getAuthHeaders()
-            );
+            const res = await apiClient.get(this.buildHistoryUrl(taskId));
 
             const entries = (res.data.data || []).map((entry: any) => ({
                 ...entry,
@@ -320,15 +223,10 @@ class TaskService {
         }
     }
 
-    // NEW: Add Task History
     async addTaskHistory(taskId: string, payload: any) {
         try {
             console.log(' Adding history for task:', taskId);
-            const res = await axios.post(
-                this.buildHistoryUrl(taskId),
-                payload,
-                getAuthHeaders()
-            );
+            const res = await apiClient.post(this.buildHistoryUrl(taskId), payload);
 
             return {
                 success: Boolean(res.data.success),
@@ -341,28 +239,6 @@ class TaskService {
                 success: false,
                 data: null,
                 message: error.response?.data?.msg || 'Failed to add history'
-            };
-        }
-    }
-
-    async inviteToTask(taskId: string, email: string, role: string) {
-        try {
-            const res = await axios.post(
-                `${this.baseUrl}${taskId}/invite`,
-                { email, role },
-                getAuthHeaders()
-            );
-
-            return {
-                success: Boolean(res.data.success),
-                data: res.data.data,
-                message: res.data.message || 'User invited successfully'
-            };
-        } catch (error: any) {
-            console.error('Error inviting to task:', error);
-            return {
-                success: false,
-                message: error.response?.data?.message || 'Failed to invite user'
             };
         }
     }

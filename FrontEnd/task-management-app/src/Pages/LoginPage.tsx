@@ -148,6 +148,20 @@ export default function AuthPage() {
 
         localStorage.setItem("token", data.result.token);
 
+        const decodeRoleFromToken = (token: string): string => {
+          try {
+            const parts = token.split('.');
+            if (parts.length < 2) return '';
+            const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+            const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
+            const json = atob(padded);
+            const payload = JSON.parse(json);
+            return payload?.role ?? '';
+          } catch {
+            return '';
+          }
+        };
+
         if (data.result.user) {
           const apiUser = data.result.user;
           const userName = apiUser.name ||
@@ -160,7 +174,7 @@ export default function AuthPage() {
             id: apiUser.id || apiUser._id || 'user-' + Date.now(),
             name: userName,
             email: apiUser.email || apiUser.userEmail || trimmedPayload.email,
-            role: apiUser.role || apiUser.userType || 'employee'
+            role: apiUser.role || apiUser.userType || decodeRoleFromToken(data.result.token) || 'user'
           };
 
           console.log("💾 Saving user data:", userData);

@@ -109,7 +109,6 @@ exports.addTask = async (req, res) => {
         console.log(" Task creation request body:", req.body);
         const {
             title,
-            description,
             assignedTo,
             dueDate,
             priority = 'medium',
@@ -150,7 +149,6 @@ exports.addTask = async (req, res) => {
         // Create new task object
         const newTask = new Task({
             title,
-            description,
             assignedTo, // Email store ho jayegi
             assignedBy, // Email store ho jayegi
             dueDate: new Date(dueDate),
@@ -286,6 +284,7 @@ exports.updateTask = async (req, res) => {
 
         delete updates.note;
         delete updates.requestRecheck;
+        delete updates.description;
 
         console.log(" Updating task:", id, updates);
 
@@ -362,7 +361,8 @@ exports.updateTask = async (req, res) => {
                     note: note || '',
                     additionalData: {
                         changedFields: nonAuditFieldsChanged,
-                        rawUpdates: Object.keys(updates || {})
+                        rawUpdates: Object.keys(updates || {}),
+                        requestRecheck
                     },
                     userId: actor.id,
                     user: {

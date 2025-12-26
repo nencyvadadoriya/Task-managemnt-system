@@ -6,10 +6,6 @@ const taskSchema = new mongoose.Schema({
     required: [true, 'Task title is required'],
     trim: true
   },
-  description: {
-    type: String,
-    trim: true
-  },
   taskType: {
     type: String,
     default: 'regular',

@@ -81,7 +81,6 @@ export interface BrandInvite {
 export interface Task {
     id: string;
     title: string;
-    description?: string;
     dueDate: string;
     status: TaskStatus;
     priority?: TaskPriority;
@@ -141,7 +140,6 @@ export type TaskHistory = {
     | 'comment_added'
     | 'comment_deleted'
     | 'title_changed'
-    | 'description_changed'
     | 'type_changed'
     | 'company_changed'
     | 'brand_changed'
@@ -255,7 +253,6 @@ export interface OtpverifyPayload {
 
 export interface NewTaskForm {
     title: string;
-    description: string;
     assignedTo: string;
     dueDate: string;
     priority: TaskPriority;

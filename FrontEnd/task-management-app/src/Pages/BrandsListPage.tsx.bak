@@ -458,11 +458,12 @@ const BrandsListPage: React.FC<BrandsListPageProps> = ({
                         if (filters.search) {
                             const searchLower = filters.search.toLowerCase();
                             const matchesTitle = task.title.toLowerCase().includes(searchLower);
+                            const matchesDesc = (task.description || '').toLowerCase().includes(searchLower);
                             const matchesBrand = typeof task.brand === 'string' 
                                 ? task.brand.toLowerCase().includes(searchLower)
                                 : (task.brand as any)?.name?.toLowerCase().includes(searchLower) || false;
                             
-                            if (!matchesTitle && !matchesBrand) {
+                            if (!matchesTitle && !matchesDesc && !matchesBrand) {
                                 return false;
                             }
                         }
@@ -1047,6 +1048,11 @@ const BrandsListPage: React.FC<BrandsListPageProps> = ({
                                                     )}
                                                 </div>
                                             </div>
+                                            
+                                            <p className="text-sm text-gray-600 mb-4 line-clamp-2">
+             q                                   {task.description || 'No description available'}
+                                            </p>
+                                            
                                             <div className="flex items-center justify-between text-xs text-gray-500">
                                                 <div className="flex items-center gap-2">
                                                     <CalendarDays className="h-3 w-3" />

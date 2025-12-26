@@ -211,9 +211,7 @@ const BrandDetailPage: React.FC<BrandDetailPageProps> = ({
             if (searchTerm) {
                 const searchLower = searchTerm.toLowerCase();
                 const matchesTitle = task.title?.toLowerCase().includes(searchLower);
-                const matchesDescription = task.description?.toLowerCase().includes(searchLower);
                 const matchesAssignee = getAssignedToName(task).toLowerCase().includes(searchLower);
-                if (!matchesTitle && !matchesDescription && !matchesAssignee) return false;
             }
 
             // Handle status filter with special case for 'overdue'
@@ -256,7 +254,6 @@ const BrandDetailPage: React.FC<BrandDetailPageProps> = ({
             allHistory.push({
                 id: `task-created-${task.id}`,
                 action: 'task_created',
-                description: `Task created: ${task.title}`,
                 taskId: task.id,
                 taskTitle: task.title,
                 taskStatus: task.status,
@@ -271,7 +268,6 @@ const BrandDetailPage: React.FC<BrandDetailPageProps> = ({
                 allHistory.push({
                     id: `task-updated-${task.id}`,
                     action: 'task_updated',
-                    description: `Task updated: ${task.title}`,
                     taskId: task.id,
                     taskTitle: task.title,
                     taskStatus: task.status,
@@ -313,7 +309,6 @@ const BrandDetailPage: React.FC<BrandDetailPageProps> = ({
         taskHistory.push({
             id: `task-created-${task.id}`,
             action: 'task_created',
-            description: `Task created: ${task.title}`,
             taskId: task.id,
             taskTitle: task.title,
             taskStatus: task.status,
@@ -328,7 +323,6 @@ const BrandDetailPage: React.FC<BrandDetailPageProps> = ({
             taskHistory.push({
                 id: `task-updated-${task.id}`,
                 action: 'task_updated',
-                description: `Task updated: ${task.title}`,
                 taskId: task.id,
                 taskTitle: task.title,
                 taskStatus: task.status,
@@ -641,7 +635,6 @@ const BrandDetailPage: React.FC<BrandDetailPageProps> = ({
                                                 <div className="flex justify-between items-start mb-4">
                                                     <div className="flex-1">
                                                         <h3 className="font-semibold text-gray-900 mb-2 text-lg line-clamp-1">{task.title}</h3>
-                                                        <p className="text-sm text-gray-500 line-clamp-2 mb-3">{task.description}</p>
                                                     </div>
                                                     <div className="flex items-center gap-1">
                                                         <button
@@ -751,7 +744,6 @@ const BrandDetailPage: React.FC<BrandDetailPageProps> = ({
                                                         <td className="py-4 px-6">
                                                             <div>
                                                                 <div className="font-medium text-gray-900 mb-1">{task.title}</div>
-                                                                <div className="text-sm text-gray-500">{task.description}</div>
                                                             </div>
                                                         </td>
                                                         <td className="py-4 px-6">
@@ -906,10 +898,6 @@ const BrandDetailPage: React.FC<BrandDetailPageProps> = ({
                                                                 <span className="text-sm font-medium text-gray-900">{task.title}</span>
                                                             </div>
                                                             <div className="flex justify-between">
-                                                                <span className="text-sm text-gray-600">Description:</span>
-                                                                <span className="text-sm font-medium text-gray-900 max-w-xs text-right">{task.description}</span>
-                                                            </div>
-                                                            <div className="flex justify-between">
                                                                 <span className="text-sm text-gray-600">Task Type:</span>
                                                                 <span className="text-sm font-medium text-gray-900">{task.taskType || 'Not specified'}</span>
                                                             </div>
@@ -1049,7 +1037,6 @@ const BrandDetailPage: React.FC<BrandDetailPageProps> = ({
                                                                 </div>
                                                             </div>
 
-                                                            <p className="text-sm text-gray-700 mb-3">{item.description}</p>
 
                                                             {/* Additional details based on action type */}
                                                             {item.action === 'task_created' && (

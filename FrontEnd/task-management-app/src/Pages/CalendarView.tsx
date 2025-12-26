@@ -102,7 +102,6 @@ const CalendarView: React.FC<CalendarViewProps> = ({
       return {
         id: `google-${event?.id ?? crypto.randomUUID()}`,
         title: event?.summary || 'Google Calendar event',
-        description: event?.description ?? undefined,
         dueDate: startIso,
         status: derivedStatus,
         priority: mappedPriority,
@@ -441,10 +440,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({
           `Title: ${task?.title ?? ''}`,
           `Due: ${formattedDue}`,
           `Priority: ${task?.priority ?? ''}`,
-          `Status: ${task?.status ?? ''}`,
-          '',
-          'Description:',
-          String(task?.description ?? '')
+          `Status: ${task?.status ?? ''}`
         ].join('\n');
 
         if (!isCompletedStatus(task?.status)) return base;
@@ -487,7 +483,6 @@ const CalendarView: React.FC<CalendarViewProps> = ({
 
         const resource: any = {
           summary: `[TASK] ${task?.title || 'Task'}`,
-          description: buildDescription(task, dueDateOnly),
           start: { date: startDate },
           end: { date: endDate },
           colorId: getColorIdForTask(task, dueDateOnly),
@@ -1028,12 +1023,6 @@ const CalendarView: React.FC<CalendarViewProps> = ({
                             }`}
                         ></div>
                       </div>
-
-                      {task.description && (
-                        <p className="text-sm text-gray-600 mb-3 line-clamp-2">
-                          {task.description}
-                        </p>
-                      )}
 
                       <div className="text-sm text-gray-600 mb-4 space-y-1">
                         <div className="flex items-center">

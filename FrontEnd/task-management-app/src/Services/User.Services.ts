@@ -1,30 +1,24 @@
-import axios from "axios";
+import apiClient from "./apiClient";
 import type { LoginBody, OtpverifyPayload, RegisterUserBody } from "../Types/Types";
 import toast from "react-hot-toast";
 
 class AuthServices {
-    authBaseUrl = "http://localhost:9000/api/";
-    authLoginUrl = "auth/login";
-    authRegisterUrl = "auth/register"; // Fixed typo: regigster -> register
-    authForgetPassword = "auth/forgetPassword";
-    authVerifyOtp = "auth/verifyOtp";
-    authChangePassword = "auth/change-password";
-    authGetAllUsers = "auth/getAllUsers";
-    authGetCurrentUser = "auth/currentUser";
-    authDeleteUser = "auth/deleteUser";
-    authUpdateUser = "auth/updateUser";
-    authCreateUser = "auth/createUser";
-
-    // Brand endpoints
-    brandUserBrands = "brand/user";
-    brandBulkUpsert = "brand/bulk-upsert";
-    brandInviteCollaborator = "brand";
+    authLoginUrl = "/auth/login";
+    authRegisterUrl = "/auth/register"; // Fixed typo: regigster -> register
+    authForgetPassword = "/auth/forgetPassword";
+    authVerifyOtp = "/auth/verifyOtp";
+    authChangePassword = "/auth/change-password";
+    authGetAllUsers = "/auth/getAllUsers";
+    authGetCurrentUser = "/auth/currentUser";
+    authDeleteUser = "/auth/deleteUser";
+    authUpdateUser = "/auth/updateUser";
+    authCreateUser = "/auth/createUser";
 
     async loginUser(payload: LoginBody) {
         try {
             console.log("🔐 Login Request - Email:", payload.email);
 
-            const res = await axios.post(this.authBaseUrl + this.authLoginUrl, payload);
+            const res = await apiClient.post(this.authLoginUrl, payload);
 
             console.log("✅ Login Response:", res.data);
             return res.data;
@@ -56,19 +50,7 @@ class AuthServices {
                 position: payload.position || ''
             };
 
-            // If admin is creating user, add token to headers
-            const config = isAdminCreating ? {
-                headers: {
-                    Authorization: `Bearer ${this.getAuthToken()}`,
-                    'Content-Type': 'application/json'
-                }
-            } : {};
-
-            const res = await axios.post(
-                this.authBaseUrl + endpoint,
-                requestPayload,
-                config
-            );
+            const res = await apiClient.post(endpoint, requestPayload);
 
             console.log("✅ Register/Create User Response:", res.data);
 
@@ -145,64 +127,9 @@ class AuthServices {
         return this.registerOrCreateUser(payload, true);
     }
 
-    getAuthToken() {
-        return localStorage.getItem('token');
-    }
-
-    private getAuthConfig() {
-        const token = this.getAuthToken();
-        return {
-            headers: {
-                Authorization: token ? `Bearer ${token}` : undefined,
-                'Content-Type': 'application/json'
-            }
-        };
-    }
-
-    async getUserBrands(userId: string) {
-        try {
-            const res = await axios.get(
-                `${this.authBaseUrl}${this.brandUserBrands}/${userId}`,
-                this.getAuthConfig()
-            );
-            return res.data;
-        } catch (error: any) {
-            const message = error.response?.data?.message || error.response?.data?.msg || 'Failed to fetch brands';
-            return { success: false, message, data: [] };
-        }
-    }
-
-    async bulkUpsertBrands(brands: any[]) {
-        try {
-            const res = await axios.post(
-                `${this.authBaseUrl}${this.brandBulkUpsert}`,
-                { brands },
-                this.getAuthConfig()
-            );
-            return res.data;
-        } catch (error: any) {
-            const message = error.response?.data?.message || error.response?.data?.msg || 'Failed to migrate brands';
-            return { success: false, message, data: [] };
-        }
-    }
-
-    async inviteBrandCollaborator(brandId: string, email: string, role: string, message?: string) {
-        try {
-            const res = await axios.post(
-                `${this.authBaseUrl}${this.brandInviteCollaborator}/${brandId}/invite`,
-                { email, role, message },
-                this.getAuthConfig()
-            );
-            return res.data;
-        } catch (error: any) {
-            const messageText = error.response?.data?.message || error.response?.data?.msg || 'Failed to send invite';
-            return { success: false, message: messageText, data: null };
-        }
-    }
-
     async getAllUsers() {
         try {
-            const res = await axios.get(this.authBaseUrl + this.authGetAllUsers, this.getAuthConfig());
+            const res = await apiClient.get(this.authGetAllUsers);
             return res.data;
         } catch (error: any) {
             toast.error(error.response?.data?.msg || "Something went wrong");
@@ -212,12 +139,7 @@ class AuthServices {
 
     async deleteUser(userId: string) {
         try {
-            const token = this.getAuthToken();
-            const res = await axios.delete(`${this.authBaseUrl}${this.authDeleteUser}/${userId}`, {
-                headers: {
-                    Authorization: token ? `Bearer ${token}` : undefined,
-                },
-            });
+            const res = await apiClient.delete(`${this.authDeleteUser}/${userId}`);
             return res.data;
         } catch (error: any) {
             const message = error.response?.data?.message || error.response?.data?.msg || 'Failed to delete user';
@@ -234,7 +156,7 @@ class AuthServices {
         try {
             console.log('Updating user:', { userId, userData });
 
-            const token = this.getAuthToken();
+            const token = localStorage.getItem('token');
 
             if (!token) {
                 toast.error('Authentication token not found. Please login again.');
@@ -245,16 +167,7 @@ class AuthServices {
                 };
             }
 
-            const res = await axios.put(
-                `${this.authBaseUrl}${this.authUpdateUser}/${userId}`,
-                userData,
-                {
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json'
-                    },
-                }
-            );
+            const res = await apiClient.put(`${this.authUpdateUser}/${userId}`, userData);
 
             console.log('Update user response:', res.data);
 
@@ -303,7 +216,7 @@ class AuthServices {
 
     async forgetPassword(payload: any) {
         try {
-            const res = await axios.post(this.authBaseUrl + this.authForgetPassword, payload);
+            const res = await apiClient.post(this.authForgetPassword, payload);
             return res.data;
         } catch (error: any) {
             toast.error(error.response?.data?.msg || "Something went wrong");
@@ -317,16 +230,22 @@ class AuthServices {
 
     async otpVerify(payload: OtpverifyPayload) {
         try {
-            const res = await axios.post(this.authBaseUrl + this.authVerifyOtp, payload)
+            const res = await apiClient.post(this.authVerifyOtp, payload)
             return res.data;
         } catch (error: any) {
-            toast.error(error.response?.data?.msg || "Something went wrong");
+            const message = error.response?.data?.msg || "Something went wrong";
+            toast.error(message);
+            return {
+                error: true,
+                msg: message,
+                status: error.response?.status || 500
+            };
         }
     }
 
     async changePassword(payload: { email: string; newPassword: string }) {
         try {
-            const res = await axios.post(this.authBaseUrl + this.authChangePassword, payload);
+            const res = await apiClient.post(this.authChangePassword, payload);
             return res.data;
         } catch (error: any) {
             const message = error.response?.data?.msg || "Something went wrong";
@@ -350,12 +269,7 @@ class AuthServices {
                 };
             }
 
-            const response = await axios.get(this.authBaseUrl + this.authGetCurrentUser, {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                }
-            });
+            const response = await apiClient.get(this.authGetCurrentUser);
 
             if (response.data.error) {
                 return {
