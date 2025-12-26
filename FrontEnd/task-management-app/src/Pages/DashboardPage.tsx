@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import {
@@ -1252,6 +1252,75 @@ const DashboardPage = () => {
             setLoading(false);
         }
     }, []);
+
+    const getAssigneeEmail = useCallback((task: Task): string => {
+        const assignedTo: any = (task as any).assignedTo;
+        if (!assignedTo) return '';
+        if (typeof assignedTo === 'string') return assignedTo;
+        return assignedTo.email || assignedTo.name || '';
+    }, []);
+
+    const getAssignerDisplayName = useCallback((task: Task): string => {
+        const assignedBy: any = (task as any).assignedBy;
+        const assignedByName = (task as any).assignedByName;
+
+        if (assignedByName && typeof assignedByName === 'string') {
+            return assignedByName;
+        }
+
+        if (assignedBy && typeof assignedBy === 'object') {
+            return assignedBy.name || assignedBy.email || 'Unknown';
+        }
+
+        if (typeof assignedBy === 'string' && assignedBy.includes('@')) {
+            const matchedUser = users.find(u => (u.email || '').toLowerCase() === assignedBy.toLowerCase());
+            if (matchedUser) return matchedUser.name || matchedUser.email;
+            return assignedBy.split('@')[0] || assignedBy;
+        }
+
+        return 'Unknown';
+    }, [users]);
+
+    const seenAssignedTaskIdsRef = useRef<Set<string>>(new Set());
+    const didInitSeenAssignedRef = useRef(false);
+
+    useEffect(() => {
+        const currentUserEmail = (currentUser?.email || '').toLowerCase();
+        if (!currentUserEmail) return;
+
+        const assignedToMe = (tasks || []).filter(t => {
+            const assigneeEmail = getAssigneeEmail(t).toLowerCase();
+            return Boolean(assigneeEmail) && assigneeEmail === currentUserEmail;
+        });
+
+        if (!didInitSeenAssignedRef.current) {
+            assignedToMe.forEach(t => {
+                if (t?.id) seenAssignedTaskIdsRef.current.add(t.id);
+            });
+            didInitSeenAssignedRef.current = true;
+            return;
+        }
+
+        const newlyAssigned = assignedToMe.filter(t => t?.id && !seenAssignedTaskIdsRef.current.has(t.id));
+        newlyAssigned.forEach(t => {
+            const assignerName = getAssignerDisplayName(t);
+            toast.success(`You got new task from ${assignerName}`);
+            seenAssignedTaskIdsRef.current.add(t.id);
+        });
+    }, [tasks, currentUser, getAssigneeEmail, getAssignerDisplayName]);
+
+    useEffect(() => {
+        const currentUserEmail = (currentUser?.email || '').toLowerCase();
+        if (!currentUserEmail) return;
+
+        const intervalId = window.setInterval(() => {
+            fetchTasks();
+        }, 15000);
+
+        return () => {
+            window.clearInterval(intervalId);
+        };
+    }, [currentUser, fetchTasks]);
 
     const fetchUsers = useCallback(async () => {
         try {
