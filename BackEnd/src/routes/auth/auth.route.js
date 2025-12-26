@@ -20,7 +20,7 @@ router.post('/login', loginUser);
 router.post('/forgetPassword', forgetPassword);
 router.post('/verifyOtp', verifyOtp);
 router.post('/change-password', changePassword);
-router.get('/getAllUsers', getAllUsers);
+router.get('/getAllUsers', authMiddleware, getAllUsers);
 router.get('/currentUser', authMiddleware, currentUser);
 
 // Admin Routes

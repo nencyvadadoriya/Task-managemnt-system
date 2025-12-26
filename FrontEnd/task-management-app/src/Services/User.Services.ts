@@ -3,7 +3,6 @@ import type { LoginBody, OtpverifyPayload, RegisterUserBody } from "../Types/Typ
 import toast from "react-hot-toast";
 
 class AuthServices {
-    // authBaseUrl = "https://task-managemnt-backend-app.onrender.com/api/";
     authBaseUrl = "http://localhost:9000/api/";
     authLoginUrl = "auth/login";
     authRegisterUrl = "auth/register"; // Fixed typo: regigster -> register
@@ -15,6 +14,11 @@ class AuthServices {
     authDeleteUser = "auth/deleteUser";
     authUpdateUser = "auth/updateUser";
     authCreateUser = "auth/createUser";
+
+    // Brand endpoints
+    brandUserBrands = "brand/user";
+    brandBulkUpsert = "brand/bulk-upsert";
+    brandInviteCollaborator = "brand";
 
     async loginUser(payload: LoginBody) {
         try {
@@ -145,9 +149,60 @@ class AuthServices {
         return localStorage.getItem('token');
     }
 
+    private getAuthConfig() {
+        const token = this.getAuthToken();
+        return {
+            headers: {
+                Authorization: token ? `Bearer ${token}` : undefined,
+                'Content-Type': 'application/json'
+            }
+        };
+    }
+
+    async getUserBrands(userId: string) {
+        try {
+            const res = await axios.get(
+                `${this.authBaseUrl}${this.brandUserBrands}/${userId}`,
+                this.getAuthConfig()
+            );
+            return res.data;
+        } catch (error: any) {
+            const message = error.response?.data?.message || error.response?.data?.msg || 'Failed to fetch brands';
+            return { success: false, message, data: [] };
+        }
+    }
+
+    async bulkUpsertBrands(brands: any[]) {
+        try {
+            const res = await axios.post(
+                `${this.authBaseUrl}${this.brandBulkUpsert}`,
+                { brands },
+                this.getAuthConfig()
+            );
+            return res.data;
+        } catch (error: any) {
+            const message = error.response?.data?.message || error.response?.data?.msg || 'Failed to migrate brands';
+            return { success: false, message, data: [] };
+        }
+    }
+
+    async inviteBrandCollaborator(brandId: string, email: string, role: string, message?: string) {
+        try {
+            const res = await axios.post(
+                `${this.authBaseUrl}${this.brandInviteCollaborator}/${brandId}/invite`,
+                { email, role, message },
+                this.getAuthConfig()
+            );
+            return res.data;
+        } catch (error: any) {
+            const messageText = error.response?.data?.message || error.response?.data?.msg || 'Failed to send invite';
+            return { success: false, message: messageText, data: null };
+        }
+    }
+
     async getAllUsers() {
         try {
-            const res = await axios.get(this.authBaseUrl + this.authGetAllUsers);
+            const res = await axios.get(this.authBaseUrl + this.authGetAllUsers, this.getAuthConfig());
             return res.data;
         } catch (error: any) {
             toast.error(error.response?.data?.msg || "Something went wrong");

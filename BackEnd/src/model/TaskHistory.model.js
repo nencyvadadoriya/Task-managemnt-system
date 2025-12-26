@@ -15,6 +15,10 @@ const taskHistorySchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  note: {
+    type: String,
+    default: ''
+  },
   oldStatus: {
     type: String,
     default: null
@@ -22,11 +26,6 @@ const taskHistorySchema = new mongoose.Schema({
   newStatus: {
     type: String,
     default: null
-  },
-  note: {
-    type: String,
-    trim: true,
-    default: ''
   },
   userId: {
     type: String,
@@ -39,6 +38,10 @@ const taskHistorySchema = new mongoose.Schema({
     userName: String,
     userEmail: String,
     userRole: String
+  },
+  additionalData: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null
   }
 }, {
   timestamps: { createdAt: 'timestamp', updatedAt: false },

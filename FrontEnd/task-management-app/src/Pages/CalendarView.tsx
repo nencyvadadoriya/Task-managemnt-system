@@ -1,35 +1,35 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { gapi } from 'gapi-script';
 import { ChevronLeft, ChevronRight, MoreVertical, CheckCircle, XCircle, RefreshCw, ExternalLink } from 'lucide-react';
 
 import type { Task, TaskStatus, UserType } from '../Types/Types';
 
 interface CalendarViewProps {
-  tasks: Task[];
-  currentUser: UserType;
-  handleToggleTaskStatus: (taskId: string, currentStatus: TaskStatus) => Promise<void>;
-  handleDeleteTask: (taskId: string) => Promise<void>;
-  handleUpdateTask: (taskId: string, updatedData: Partial<Task>) => Promise<void>;
-  canEditDeleteTask: (task: Task) => boolean;
-  canMarkTaskDone: (task: Task) => boolean;
-  getAssignedUserInfo: (task: Task) => { name: string; email: string };
-  formatDate: (dateString: string) => string;
-  isOverdue: (dueDate: string, status: string) => boolean;
+  tasks?: Task[];
+  currentUser?: UserType;
+  handleToggleTaskStatus?: (taskId: string, currentStatus: TaskStatus) => Promise<void>;
+  handleDeleteTask?: (taskId: string) => Promise<void>;
+  handleUpdateTask?: (taskId: string, updatedData: Partial<Task>) => Promise<void>;
+  canEditDeleteTask?: (task: Task) => boolean;
+  canMarkTaskDone?: (task: Task) => boolean;
+  getAssignedUserInfo?: (task: Task) => { name: string; email: string };
+  formatDate?: (dateString: string) => string;
+  isOverdue?: (dueDate: string, status: string) => boolean;
   // Optional sidebar collapsed state from DashboardPage
   isSidebarCollapsed?: boolean;
 }
 
 const CalendarView: React.FC<CalendarViewProps> = ({
-  tasks,
-  currentUser,
+  tasks = [],
+  currentUser = {} as UserType,
   handleToggleTaskStatus,
   handleDeleteTask,
   handleUpdateTask,
-  canEditDeleteTask,
-  canMarkTaskDone,
-  getAssignedUserInfo,
-  formatDate,
-  isOverdue
+  canEditDeleteTask = () => false,
+  canMarkTaskDone = () => false,
+  getAssignedUserInfo = () => ({ name: 'Unknown', email: '' }),
+  formatDate = (d) => d,
+  isOverdue = () => false
 }) => {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
@@ -41,8 +41,31 @@ const CalendarView: React.FC<CalendarViewProps> = ({
   const [loadingGoogleEvents, setLoadingGoogleEvents] = useState(false);
   const [googleError, setGoogleError] = useState<string | null>(null);
 
-  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
-  const googleApiKey = import.meta.env.VITE_GOOGLE_API_KEY as string | undefined;
+  const tokenClientRef = useRef<any>(null);
+  const accessTokenRef = useRef<string | null>(null);
+
+  const googleClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim();
+  const googleApiKey = (import.meta.env.VITE_GOOGLE_API_KEY as string | undefined)?.trim();
+
+  const calendarScope = 'https://www.googleapis.com/auth/calendar.events';
+
+  const loadScript = useCallback((src: string) => {
+    return new Promise<void>((resolve, reject) => {
+      const existing = document.querySelector(`script[src="${src}"]`);
+      if (existing) {
+        resolve();
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.src = src;
+      script.async = true;
+      script.defer = true;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
+      document.head.appendChild(script);
+    });
+  }, []);
 
   const convertEventToTask = useCallback(
     (event: any): Task => {
@@ -107,58 +130,157 @@ const CalendarView: React.FC<CalendarViewProps> = ({
 
     let isMounted = true;
 
-    const initClient = () => {
-      gapi.client
-        .init({
-          apiKey: googleApiKey,
-          clientId: googleClientId,
-          discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest'],
-          scope: 'https://www.googleapis.com/auth/calendar.readonly'
-        })
-        .then(() => {
-          if (!isMounted) return;
-          setGoogleAuthReady(true);
-          setGoogleError(null);
-          const auth = gapi.auth2.getAuthInstance();
-          const handleSignInChange = (signedIn: boolean) => {
-            if (!isMounted) return;
-            setIsGoogleSignedIn(signedIn);
-          };
+    const init = async () => {
+      try {
+        await loadScript('https://accounts.google.com/gsi/client');
 
-          handleSignInChange(auth.isSignedIn.get());
-          auth.isSignedIn.listen(handleSignInChange);
-        })
-        .catch((error : any) => {
-            console.error('Error initializing Google API client', error);
-            if (isMounted) {
-              setGoogleAuthReady(false);
-              setGoogleError('Unable to initialize Google Calendar sync. Check console for details.');
-            } 
+        await new Promise<void>((resolve, reject) => {
+          gapi.load('client', {
+            callback: () => resolve(),
+            onerror: () => reject(new Error('Failed to load Google API libraries. Please check your internet connection.')),
+            timeout: 10000,
+            ontimeout: () => reject(new Error('Google API loading timed out. Please refresh the page.'))
           });
+        });
+
+        await gapi.client.init({
+          apiKey: googleApiKey,
+          discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest']
+        } as any);
+
+        if (!isMounted) return;
+
+        const google = (window as any).google;
+        if (!google?.accounts?.oauth2?.initTokenClient) {
+          setGoogleAuthReady(false);
+          setIsGoogleSignedIn(false);
+          setGoogleError('Google Identity Services could not be initialized. Please refresh the page.');
+          return;
+        }
+
+        tokenClientRef.current = google.accounts.oauth2.initTokenClient({
+          client_id: googleClientId,
+          scope: calendarScope,
+          callback: (tokenResponse: any) => {
+            if (!isMounted) return;
+
+            const accessToken = tokenResponse?.access_token;
+            if (!accessToken) {
+              setIsGoogleSignedIn(false);
+              setGoogleError('Google sign-in failed: missing access token.');
+              return;
+            }
+
+            accessTokenRef.current = accessToken;
+            gapi.client.setToken({ access_token: accessToken });
+            setIsGoogleSignedIn(true);
+            setGoogleError(null);
+          }
+        });
+
+        setGoogleAuthReady(true);
+        setGoogleError(null);
+      } catch (error: any) {
+        console.error('Error initializing Google API client', error);
+        if (!isMounted) return;
+
+        setGoogleAuthReady(false);
+        setIsGoogleSignedIn(false);
+
+        const rawCode = error?.error || error?.details || error?.error?.message || error?.message;
+        const errorMessage = rawCode || 'Unknown error occurred';
+        setGoogleError(`Google Calendar initialization failed: ${errorMessage}`);
+      }
     };
 
     setGoogleError(null);
-    gapi.load('client:auth2', initClient);
+    init();
 
     return () => {
       isMounted = false;
     };
-  }, [googleApiKey, googleClientId]);
+  }, [googleApiKey, googleClientId, loadScript]);
 
-  const handleGoogleSignIn = useCallback(() => {
-    if (!googleAuthReady) return;
-    const authInstance = gapi.auth2.getAuthInstance();
-    authInstance.signIn();
+  const handleGoogleSignIn = useCallback(async () => {
+    if (!googleAuthReady) {
+      setGoogleError('Google Calendar is not ready yet. Please wait...');
+      return;
+    }
+    try {
+      const tokenClient = tokenClientRef.current;
+      if (!tokenClient) {
+        setGoogleError('Google sign-in is not initialized. Please refresh the page.');
+        return;
+      }
+
+      setGoogleError(null);
+      tokenClient.requestAccessToken({ prompt: 'select_account' });
+    } catch (error: any) {
+      console.error('Google sign in error:', error);
+
+      const errorCode = error?.error || error?.details || error?.message || 'Failed to sign in with Google';
+      const lower = String(errorCode).toLowerCase();
+
+      if (lower.includes('redirect_uri_mismatch')) {
+        setGoogleError(
+          'Sign in failed: redirect_uri_mismatch. Fix in Google Cloud Console -> Credentials -> OAuth Client (Web): add your app URL under Authorized JavaScript origins and Authorized redirect URIs (e.g. http://localhost:5173).'
+        );
+        return;
+      }
+
+      if (errorCode === 'popup_closed_by_user') {
+        setGoogleError(
+          'Sign in cancelled (popup closed). If you saw “redirect_uri_mismatch” in the popup, fix OAuth origins/redirect URIs in Google Cloud Console. Also ensure the browser is not blocking popups.'
+        );
+        return;
+      }
+
+      // gapi auth2 sometimes returns a structured token error
+      if (error?.type === 'tokenFailed' || lower.includes('tokenfailed') || lower.includes('server_error')) {
+        const debug = {
+          type: error?.type,
+          error: error?.error,
+          details: error?.details,
+          message: error?.message,
+          idpId: error?.idpId
+        };
+
+        setGoogleError(
+          `Sign in failed: tokenFailed/server_error. Common fixes: (1) In Google Cloud -> Credentials -> API key restrictions: allow http://localhost:5173/* and http://127.0.0.1:5173/* (or temporarily remove restrictions). (2) Ensure OAuth consent screen is External + Testing and your Gmail is added as Test user. (3) Allow third-party cookies / disable adblock. Details: ${JSON.stringify(debug)}`
+        );
+        return;
+      }
+
+      setGoogleError(`Sign in failed: ${String(errorCode)}`);
+    }
   }, [googleAuthReady]);
 
-  const handleGoogleSignOut = useCallback(() => {
+  const handleGoogleSignOut = useCallback(async () => {
     if (!googleAuthReady) return;
-    const authInstance = gapi.auth2.getAuthInstance();
-    authInstance.signOut();
+    try {
+      const accessToken = accessTokenRef.current;
+      const google = (window as any).google;
+
+      if (accessToken && google?.accounts?.oauth2?.revoke) {
+        await new Promise<void>((resolve) => {
+          google.accounts.oauth2.revoke(accessToken, () => resolve());
+        });
+      }
+
+      accessTokenRef.current = null;
+      gapi.client.setToken(null as any);
+      setIsGoogleSignedIn(false);
+      setGoogleEvents([]);
+      setGoogleEventLinks({});
+    } catch (error: any) {
+      console.error('Google sign out error:', error);
+      setGoogleError('Failed to sign out from Google Calendar');
+    }
   }, [googleAuthReady]);
 
   const fetchGoogleEvents = useCallback(async () => {
     if (!googleAuthReady || !isGoogleSignedIn) {
+      setGoogleError('Please connect to Google Calendar first');
       return;
     }
 
@@ -166,6 +288,13 @@ const CalendarView: React.FC<CalendarViewProps> = ({
     setGoogleError(null);
 
     try {
+      // Verify token is still valid
+      if (!accessTokenRef.current) {
+        setIsGoogleSignedIn(false);
+        setGoogleError('Google Calendar session expired. Please reconnect.');
+        return;
+      }
+
       const startOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
       const endOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0, 23, 59, 59, 999);
 
@@ -191,13 +320,260 @@ const CalendarView: React.FC<CalendarViewProps> = ({
 
       setGoogleEvents(mappedTasks);
       setGoogleEventLinks(linkMap);
-    } catch (error) {
+      setGoogleError(null);
+    } catch (error: any) {
       console.error('Error loading Google Calendar events', error);
-      setGoogleError('Unable to load Google Calendar events right now.');
+      // Handle specific error cases
+      if (error.status === 401 || error.code === 401) {
+        accessTokenRef.current = null;
+        gapi.client.setToken(null as any);
+        setIsGoogleSignedIn(false);
+        setGoogleError('Google Calendar authorization expired. Please reconnect.');
+      } else if (error.status === 403) {
+        setGoogleError('Access denied to Google Calendar. Please check permissions.');
+      } else if (error.status === 429) {
+        setGoogleError('Too many requests to Google Calendar. Please try again later.');
+      } else {
+        const errorMessage = error?.result?.error?.message || error?.message || 'Failed to load Google Calendar events';
+        setGoogleError(`Calendar sync error: ${errorMessage}`);
+      }
+      // Clear events on error
+      setGoogleEvents([]);
+      setGoogleEventLinks({});
     } finally {
       setLoadingGoogleEvents(false);
     }
   }, [convertEventToTask, currentMonth, googleAuthReady, isGoogleSignedIn]);
+
+  const syncTasksToGoogleCalendar = useCallback(async () => {
+    if (!googleAuthReady || !isGoogleSignedIn) {
+      setGoogleError('Please connect to Google Calendar first');
+      return;
+    }
+
+    if (!accessTokenRef.current) {
+      setGoogleError('Google Calendar session expired. Please reconnect.');
+      setIsGoogleSignedIn(false);
+      return;
+    }
+
+    setLoadingGoogleEvents(true);
+    setGoogleError(null);
+
+    try {
+      const rawMap = localStorage.getItem('tms_google_task_event_map');
+      const eventMap: Record<string, string> = rawMap ? JSON.parse(rawMap) : {};
+
+      const toDateOnlyString = (value: any): string | null => {
+        if (!value) return null;
+        const raw = String(value).trim();
+        if (!raw) return null;
+
+        if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+        if (raw.includes('T')) {
+          const [datePart] = raw.split('T');
+          if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) return datePart;
+        }
+
+        const d = new Date(raw);
+        if (Number.isNaN(d.getTime())) return null;
+        return d.toISOString().split('T')[0];
+      };
+
+      const addDaysToDateOnly = (dateOnly: string, days: number): string => {
+        const m = dateOnly.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!m) return dateOnly;
+
+        const year = Number(m[1]);
+        const monthIndex = Number(m[2]) - 1;
+        const day = Number(m[3]);
+
+        const dt = new Date(Date.UTC(year, monthIndex, day + days));
+        const y = dt.getUTCFullYear();
+        const mo = String(dt.getUTCMonth() + 1).padStart(2, '0');
+        const da = String(dt.getUTCDate()).padStart(2, '0');
+        return `${y}-${mo}-${da}`;
+      };
+
+      const normalizeStatus = (status: any): string => {
+        const s = String(status ?? '').trim().toLowerCase();
+        if (s === 'in progress' || s === 'in-progress' || s === 'inprogress') return 'in-progress';
+        if (s === 'complete' || s === 'completed' || s === 'done') return 'completed';
+        if (s === 'pending' || s === 'todo' || s === 'to-do') return 'pending';
+        return s || 'pending';
+      };
+
+      const isCompletedStatus = (status: any): boolean => normalizeStatus(status) === 'completed';
+
+      const computeOverdue = (task: any, dueDateOnly: string): boolean => {
+        if (isCompletedStatus(task?.status)) return false;
+
+        if (typeof isOverdue === 'function') {
+          try {
+            if (isOverdue(dueDateOnly, String(task?.status ?? ''))) return true;
+          } catch {
+            // ignore
+          }
+        }
+
+        const due = new Date(`${dueDateOnly}T00:00:00`);
+        if (Number.isNaN(due.getTime())) return false;
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        return due.getTime() < today.getTime();
+      };
+
+      const getColorIdForTask = (task: any, dueDateOnly: string): string => {
+        if (computeOverdue(task, dueDateOnly)) return '11';
+        const s = normalizeStatus(task?.status);
+        if (s === 'pending') return '5';
+        if (s === 'in-progress') return '9';
+        if (s === 'completed') return '10';
+        return '5';
+      };
+
+      const buildDescription = (task: any, dueDateOnly: string): string => {
+        const formattedDue = typeof formatDate === 'function' ? formatDate(dueDateOnly) : dueDateOnly;
+        const base = [
+          'TASK DETAILS',
+          '',
+          `Title: ${task?.title ?? ''}`,
+          `Due: ${formattedDue}`,
+          `Priority: ${task?.priority ?? ''}`,
+          `Status: ${task?.status ?? ''}`,
+          '',
+          'Description:',
+          String(task?.description ?? '')
+        ].join('\n');
+
+        if (!isCompletedStatus(task?.status)) return base;
+        if (base.includes('✅ Completed')) return base;
+        return `${base}\n\n✅ Completed`;
+      };
+
+      const findExistingEventIdByTaskId = async (taskId: string): Promise<string | null> => {
+        try {
+          const resp = await gapi.client.calendar.events.list({
+            calendarId: 'primary',
+            maxResults: 1,
+            singleEvents: true,
+            privateExtendedProperty: [`taskId=${taskId}`]
+          } as any);
+          const items: any[] = resp?.result?.items ?? [];
+          const found = items[0];
+          if (found?.id) return String(found.id);
+
+          const resp2 = await gapi.client.calendar.events.list({
+            calendarId: 'primary',
+            maxResults: 1,
+            singleEvents: true,
+            privateExtendedProperty: [`tmsTaskId=${taskId}`]
+          } as any);
+          const items2: any[] = resp2?.result?.items ?? [];
+          const found2 = items2[0];
+          return found2?.id ? String(found2.id) : null;
+        } catch {
+          return null;
+        }
+      };
+
+      const upsertEventForTask = async (task: any, dueDateOnly: string): Promise<string | null> => {
+        const taskId = String(task?.id ?? '').trim();
+        if (!taskId) return null;
+
+        const startDate = dueDateOnly;
+        const endDate = addDaysToDateOnly(dueDateOnly, 1);
+
+        const resource: any = {
+          summary: `[TASK] ${task?.title || 'Task'}`,
+          description: buildDescription(task, dueDateOnly),
+          start: { date: startDate },
+          end: { date: endDate },
+          colorId: getColorIdForTask(task, dueDateOnly),
+          extendedProperties: {
+            private: {
+              taskId,
+              type: 'task',
+              priority: String(task?.priority ?? ''),
+              status: String(task?.status ?? '')
+            }
+          }
+        };
+
+        const knownEventId = eventMap[taskId] ? String(eventMap[taskId]) : null;
+        const existingEventId = knownEventId || (await findExistingEventIdByTaskId(taskId));
+
+        if (existingEventId) {
+          const res = await gapi.client.calendar.events.patch({
+            calendarId: 'primary',
+            eventId: existingEventId,
+            resource
+          } as any);
+
+          return res?.result?.id ? String(res.result.id) : existingEventId;
+        }
+
+        const res = await gapi.client.calendar.events.insert({
+          calendarId: 'primary',
+          resource
+        } as any);
+
+        return res?.result?.id ? String(res.result.id) : null;
+      };
+
+      const localTaskIds = new Set(
+        (tasks || [])
+          .filter((t) => !String(t.id || '').startsWith('google-'))
+          .map((t) => String(t.id))
+      );
+
+      for (const mappedTaskId of Object.keys(eventMap)) {
+        if (localTaskIds.has(mappedTaskId)) continue;
+        const eventId = String(eventMap[mappedTaskId] || '').trim();
+        if (!eventId) {
+          delete eventMap[mappedTaskId];
+          continue;
+        }
+
+        try {
+          await gapi.client.calendar.events.delete({
+            calendarId: 'primary',
+            eventId
+          } as any);
+        } catch {
+          // ignore
+        }
+
+        delete eventMap[mappedTaskId];
+      }
+
+      const tasksToSync = (tasks || [])
+        .filter((t) => !String(t.id || '').startsWith('google-'))
+        .filter((t) => Boolean(t.dueDate));
+
+      for (const task of tasksToSync) {
+        const taskId = String(task?.id ?? '').trim();
+        if (!taskId) continue;
+        const dueDateOnly = toDateOnlyString(task?.dueDate);
+        if (!dueDateOnly) continue;
+
+        const eventId = await upsertEventForTask(task, dueDateOnly);
+        if (eventId) {
+          eventMap[taskId] = eventId;
+        }
+      }
+
+      localStorage.setItem('tms_google_task_event_map', JSON.stringify(eventMap));
+      await fetchGoogleEvents();
+    } catch (error: any) {
+      console.error('Error syncing tasks to Google Calendar', error);
+      const msg = error?.result?.error?.message || error?.message || 'Failed to sync tasks to Google Calendar';
+      setGoogleError(msg);
+    } finally {
+      setLoadingGoogleEvents(false);
+    }
+  }, [fetchGoogleEvents, formatDate, googleAuthReady, isGoogleSignedIn, isOverdue, tasks]);
 
   useEffect(() => {
     if (googleAuthReady && isGoogleSignedIn) {
@@ -310,7 +686,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({
   // Handle edit task
   const handleEditTask = (task: Task) => {
     if (task.type === 'google-event') return;
-    handleUpdateTask(task.id, task);
+    handleUpdateTask?.(task.id, task);
   };
 
   // Handle delete task with confirmation
@@ -319,7 +695,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({
       return;
     }
     if (window.confirm('Are you sure you want to delete this task?')) {
-      await handleDeleteTask(taskId);
+      await handleDeleteTask?.(taskId);
     }
   };
 
@@ -329,7 +705,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({
       return;
     }
 
-    await handleToggleTaskStatus(task.id, task.status as TaskStatus);
+    await handleToggleTaskStatus?.(task.id, task.status as TaskStatus);
   };
 
   return (
@@ -389,11 +765,24 @@ const CalendarView: React.FC<CalendarViewProps> = ({
             <div className="flex items-center space-x-2">
               {isGoogleSignedIn && (
                 <button
+                  onClick={syncTasksToGoogleCalendar}
+                  disabled={loadingGoogleEvents}
+                  className={`px-3 py-2 text-sm rounded-lg transition-colors flex items-center space-x-1 ${loadingGoogleEvents
+                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+                    }`}
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  <span>Sync Tasks</span>
+                </button>
+              )}
+              {isGoogleSignedIn && (
+                <button
                   onClick={fetchGoogleEvents}
                   disabled={loadingGoogleEvents}
                   className={`px-3 py-2 text-sm rounded-lg transition-colors flex items-center space-x-1 ${loadingGoogleEvents
-                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                     }`}
                 >
                   <RefreshCw className={`h-4 w-4 ${loadingGoogleEvents ? 'animate-spin' : ''}`} />
@@ -412,8 +801,8 @@ const CalendarView: React.FC<CalendarViewProps> = ({
                   onClick={handleGoogleSignIn}
                   disabled={!googleAuthReady}
                   className={`px-4 py-2 text-sm rounded-lg transition-colors font-medium ${googleAuthReady
-                      ? 'bg-blue-50 text-blue-700 hover:bg-blue-100'
-                      : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    ? 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+                    : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                     }`}
                 >
                   Connect Google Calendar
@@ -597,8 +986,8 @@ const CalendarView: React.FC<CalendarViewProps> = ({
                     <div
                       key={task.id}
                       className={`p-4 border rounded-lg hover:border-blue-300 transition-colors duration-200 ${task.type === 'google-event'
-                          ? 'border-purple-200 bg-purple-50'
-                          : 'border-gray-200 bg-white'
+                        ? 'border-purple-200 bg-purple-50'
+                        : 'border-gray-200 bg-white'
                         }`}
                     >
                       <div className="flex justify-between items-start mb-3">

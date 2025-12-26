@@ -1,6 +1,82 @@
 export type TaskStatus = 'in-progress' | 'completed' | 'pending' | 'cancelled' | 'on-hold';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 
+// Brand-related types
+export type BrandStatus = 'active' | 'inactive' | 'archived';
+export type BrandRole = 'owner' | 'admin' | 'member' | 'viewer';
+
+export interface Brand {
+    id: string | number;
+    _id?: string;
+    name: string;
+    collaborators: any[];
+    description?: string;
+    logo?: string;
+    company: string;
+    category?: string;
+    website?: string;
+    status: BrandStatus;
+    createdAt: string;
+    updatedAt?: string;
+    createdBy: string;
+    history?: BrandHistory[];
+    tasks?: Task[];
+}
+
+export interface CreateBrandDto {
+    name: string;
+    description: string;
+    company: string;
+    category?: string;
+    website?: string;
+    status: BrandStatus;
+    logo?: string;
+}
+
+export interface UpdateBrandDto extends Partial<CreateBrandDto> { }
+
+export interface BrandCollaborator {
+    id: string;
+    brandId: string;
+    userId: string;
+    email: string;
+    name: string;
+    role: 'owner' | 'admin' | 'editor' | 'viewer';
+    invitedAt: string;
+    joinedAt?: string;
+    invitedBy: string;
+    status: 'pending' | 'accepted' | 'declined';
+    stats?: {
+        assignedTasks: number;
+        completedTasks: number;
+        pendingTasks: number;
+        overdueTasks: number;
+    };
+}
+
+export interface BrandHistory {
+    id: string;
+    brandId: string | number;
+    action: 'brand_created' | 'brand_updated' | 'collaborator_added' | 'collaborator_removed' | 'collaborator_role_changed' | 'collaborator_invited';
+    description: string;
+    userId: string;
+    userName: string;
+    userEmail: string;
+    userRole: string;
+    timestamp: string;
+    metadata?: Record<string, any>;
+    taskTitle?: string;
+    isTaskHistory?: boolean;
+}
+
+export interface BrandInvite {
+    email: string;
+    role: BrandRole;
+    brandId: string | number;
+    invitedBy: string;
+    message?: string;
+}
+
 // Types/Types.ts file mein Task interface mein add karein:
 export interface Task {
     id: string;
@@ -16,12 +92,14 @@ export interface Task {
     completedApproval?: boolean;
     history?: TaskHistory[];
     comments?: CommentType[];
-
+    assignedByName?: string;  // नया फ़ील्ड
+    assignedToName?: string;
     category?: string;
     tags?: string[];
     type?: string;          // 'regular', 'troubleshoot', 'maintenance', 'development'
     company?: string;       // 'acs', 'md inpex', 'tech solutions', 'global inc'
     brand?: string;         // 'chips', 'soy', 'saffola', etc.
+    brandId?: string | number;
     project?: string;       // Project name
     assignedToUser?: UserType;
 
@@ -31,62 +109,53 @@ export interface Task {
     completionType?: 'admin' | 'user';
     completedBy?: string;
 }
-export interface TaskHistory {
-    id: string;
-    taskId: string;
-    action:
-    | 'created'
+
+
+// Types.ts में
+export interface FilterState {
+    status: string;
+    priority: string;
+    assigned: string;
+    date: string;
+    taskType: string;
+    company: string;
+    brand: string;
+}
+export type TaskHistory = {
+  id: string;
+  taskId: string;
+  action: 
     | 'task_created'
-    | 'reassigned'
-    | 'completed'
-    | 'pending'
-    | 'status_changed'
-    | 'priority_changed'
-    | 'due_date_changed'
-    | 'edited'
     | 'task_edited'
     | 'task_deleted'
-    | 'task_reassigned'
-    | 'user_completed'
-    | 'admin_completed'
-    | 'user_reassigned'
-    | 'admin_reassigned'
+    | 'marked_completed'
+    | 'marked_pending'
     | 'admin_approved'
-    | 'admin_rejected'
     | 'rejected_by_admin'
     | 'assigner_permanent_approved'
     | 'permanent_approval_removed'
-    | 'assigner_approval_removed'
-    | 'bulk_completed'
-    | 'bulk_pending'
-    | 'marked_pending'
-    | 'marked_completed'
+    | 'task_reassigned'
+    | 'priority_changed'
+    | 'due_date_changed'
+    | 'status_changed'
     | 'comment_added'
     | 'comment_deleted'
-    | 'status_completed_by_admin'
-    | 'status_completed_by_assigner'
-    | 'status_completed_by_assignee'
-    | 'status_pending_by_admin'
-    | 'status_pending_by_assigner'
-    | 'status_pending_by_assignee'
-    | 'approval_granted'
-    | 'approval_revoked'
-    | 'assigner_recheck_requested'
-    | 'approval_removed'
-    | 'task_approved';
-    userId: string;
-    userName: string;
-    userEmail: string;
-    userRole?: string;
-    oldValue?: string;
-    newValue?: string;
-    description?: string;
-    timestamp: string;
-    oldStatus?: string;
-    newStatus?: string;
-    note?: string;
-    additionalData?: Record<string, any>;
-}
+    | 'title_changed'
+    | 'description_changed'
+    | 'type_changed'
+    | 'company_changed'
+    | 'brand_changed'
+    | 'task_edit_failed'
+    | 'bulk_completed'
+    | 'bulk_pending';
+  description: string;
+  timestamp: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  userRole: string;
+  additionalData?: Record<string, any>;
+};
 
 
 export interface CommentType {
@@ -101,11 +170,29 @@ export interface CommentType {
     updatedAt: string;
 }
 
+export interface Company {
+    id: string;
+    _id?: string;
+    name: string;
+    isActive?: boolean;
+    createdAt?: string;
+    updatedAt?: string;
+}
+
+export interface TaskTypeItem {
+    id: string;
+    _id?: string;
+    name: string;
+    isActive?: boolean;
+    createdAt?: string;
+    updatedAt?: string;
+}
+
 export interface UserType {
     id: string;
     name: string;
     _id?: string;
-    role: string;
+    role: 'user' | 'admin' | 'manager' | string;
     email: string;
     phone?: string;
     department?: string;
@@ -175,6 +262,7 @@ export interface NewTaskForm {
     taskType: string;
     companyName: string;
     brand: string;
+    brandId?: string | number;
 }
 
 export type CompanyFilterValue = 'all' | 'company-a' | 'company-b' | 'company-c' | 'company-d';

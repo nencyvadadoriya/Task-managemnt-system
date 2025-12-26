@@ -1,29 +1,36 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  X, LogOut, ListTodo, ChevronLeft, ChevronRight, Menu, Sun, Moon
+import {
+  X, LogOut, ListTodo, ChevronLeft, ChevronRight, Menu, Sun, Moon,
+  Users, Home, Calendar, CheckSquare, User, Building
 } from 'lucide-react';
-import type { NavigationItem, UserType } from '../Types/Types';
+import type { UserType } from '../Types/Types';
 
 interface SidebarProps {
   sidebarOpen: boolean;
   setSidebarOpen: (open: boolean) => void;
-  navigation: NavigationItem[];
   currentUser: UserType;
   handleLogout: () => void;
-  isCollapsed: boolean; // ✅ Add this
-  setIsCollapsed: (collapsed: boolean) => void; // ✅ Add this
+  isCollapsed: boolean;
+  setIsCollapsed: (collapsed: boolean) => void;
+  navigateTo: (page: string) => void;
+  currentView?: 'dashboard' | 'all-tasks' | 'calendar' | 'team' | 'profile' | 'brands' | 'brand-detail';
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
   sidebarOpen,
   setSidebarOpen,
-  navigation,
   currentUser,
   handleLogout,
-  isCollapsed, // ✅ Receive from parent
-  setIsCollapsed // ✅ Receive from parent
+  isCollapsed,
+  setIsCollapsed,
+  navigateTo,
+  currentView = 'dashboard'
 }) => {
   const [darkMode, setDarkMode] = useState(false);
+
+  // Check if user is admin
+  const isAdmin = currentUser?.role === 'admin';
+  const isAdminOrManager = currentUser?.role === 'admin' || currentUser?.role === 'manager';
 
   const getDisplayInitial = () => {
     if (!currentUser) return 'U';
@@ -39,11 +46,83 @@ const Sidebar: React.FC<SidebarProps> = ({
     return 'U';
   };
 
+  // Combine navigation based on user role and current view
+  const getNavigationItems = () => {
+    const baseItems = [
+      {
+        name: 'Dashboard',
+        icon: Home,
+        current: currentView === 'dashboard',
+        onClick: () => navigateTo('dashboard'),
+        badge: 0
+      },
+      {
+        name: 'All Tasks',
+        icon: CheckSquare,
+        current: currentView === 'all-tasks',
+        onClick: () => navigateTo('tasks'),
+        badge:0
+      },
+      {
+        name: 'Calendar',
+        icon: Calendar,
+        current: currentView === 'calendar',
+        onClick: () => navigateTo('calendar'),
+        badge: 0
+      }
+    ];
+
+    const itemsWithRoleGated = [
+      ...baseItems,
+      ...(isAdminOrManager
+        ? [
+          {
+            name: 'Brands',
+            icon: Building,
+            current: currentView === 'brands',
+            onClick: () => navigateTo('brands'),
+            badge: 0
+          }
+        ]
+        : [])
+    ];
+
+    if (isAdmin) {
+      // For admin: Dashboard, All Tasks, Calendar, Team, Profile
+      return [
+        ...itemsWithRoleGated,
+        {
+          name: 'Team',
+          icon: Users,
+          current: currentView === 'team',
+          onClick: () => navigateTo('team'),
+          badge: 0
+        },
+        {
+          name: 'Profile',
+          icon: User,
+          current: currentView === 'profile',
+          onClick: () => navigateTo('profile'),
+          badge: 0
+        }
+      ];
+    }
+    // For user: Dashboard, All Tasks, Calendar, Profile
+    return [
+      ...itemsWithRoleGated,
+      {
+        name: 'Profile',
+        icon: User,
+        current: currentView === 'profile',
+        onClick: () => navigateTo('profile'),
+        badge: 0
+      }
+    ];
+  };
+
   const toggleSidebarMode = () => {
     const newState = !isCollapsed;
     setIsCollapsed(newState);
-    
-    // Save preference to localStorage
     localStorage.setItem('sidebarCollapsed', JSON.stringify(newState));
   };
 
@@ -56,7 +135,6 @@ const Sidebar: React.FC<SidebarProps> = ({
     }
   };
 
-  // Load sidebar preference on mount
   useEffect(() => {
     const savedState = localStorage.getItem('sidebarCollapsed');
     if (savedState) {
@@ -102,18 +180,17 @@ const Sidebar: React.FC<SidebarProps> = ({
               </button>
             </div>
             <nav className="mt-8 px-2 space-y-1">
-              {navigation.map((item) => (
+              {getNavigationItems().map((item) => (
                 <button
                   key={item.name}
                   onClick={() => {
                     item.onClick();
-                    setSidebarOpen(false); 
-                  }} 
-                  className={`group flex items-center justify-between w-full px-3 py-3 text-base font-medium rounded-xl transition-all duration-200 ${
-                    item.current
-                      ? 'bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-900/30 dark:to-blue-800/30 text-blue-600 dark:text-blue-400 border-l-4 border-blue-500'
-                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/50 hover:text-gray-900 dark:hover:text-white hover:border-l-4 hover:border-gray-300 dark:hover:border-gray-600'
-                  }`}
+                    setSidebarOpen(false);
+                  }}
+                  className={`group flex items-center justify-between w-full px-3 py-3 text-base font-medium rounded-xl transition-all duration-200 ${item.current
+                    ? 'bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-900/30 dark:to-blue-800/30 text-blue-600 dark:text-blue-400 border-l-4 border-blue-500'
+                    : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/50 hover:text-gray-900 dark:hover:text-white hover:border-l-4 hover:border-gray-300 dark:hover:border-gray-600'
+                    }`}
                 >
                   <div className="flex items-center">
                     <item.icon className="mr-4 flex-shrink-0 h-5 w-5" />
@@ -137,7 +214,14 @@ const Sidebar: React.FC<SidebarProps> = ({
                 </div>
               </div>
               <div className="ml-3 flex-1">
-                <p className="text-base font-medium text-gray-700 dark:text-gray-300">{currentUser.name}</p>
+                <p className="text-base font-medium text-gray-700 dark:text-gray-300">
+                  {currentUser.name}
+                  {isAdmin && (
+                    <span className="ml-2 text-xs bg-blue-100 text-blue-800 dark:bg-blue-800 dark:text-blue-100 px-2 py-0.5 rounded-full">
+                      Admin
+                    </span>
+                  )}
+                </p>
                 <p className="text-sm text-gray-500 dark:text-gray-400">{currentUser.email}</p>
                 <div className="flex items-center gap-3 mt-2">
                   <button
@@ -173,7 +257,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 </div>
               </div>
             )}
-            
+
             <button
               onClick={toggleSidebarMode}
               className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
@@ -189,22 +273,21 @@ const Sidebar: React.FC<SidebarProps> = ({
           {/* Navigation */}
           <div className="flex-1 flex flex-col pt-5 pb-4 overflow-y-auto">
             <nav className="flex-1 px-2 space-y-2">
-              {navigation.map((item) => (
+              {getNavigationItems().map((item) => (
                 <button
                   key={item.name}
                   onClick={item.onClick}
-                  className={`group flex items-center justify-between w-full px-3 py-3 rounded-xl transition-all duration-200 ${
-                    item.current
-                      ? 'bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-900/30 dark:to-blue-800/30 text-blue-600 dark:text-blue-400'
-                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/50 hover:text-gray-900 dark:hover:text-white'
-                  } ${isCollapsed ? 'justify-center px-2' : ''}`}
+                  className={`group flex items-center justify-between w-full px-3 py-3 rounded-xl transition-all duration-200 ${item.current
+                    ? 'bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-900/30 dark:to-blue-800/30 text-blue-600 dark:text-blue-400'
+                    : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/50 hover:text-gray-900 dark:hover:text-white'
+                    } ${isCollapsed ? 'justify-center px-2' : ''}`}
                   title={isCollapsed ? item.name : ''}
                 >
                   <div className="flex items-center">
                     <item.icon className={`flex-shrink-0 h-5 w-5 ${isCollapsed ? '' : 'mr-3'}`} />
                     {!isCollapsed && item.name}
                   </div>
-                  
+
                   {!isCollapsed && item.badge > 0 && (
                     <span className="bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-semibold px-2 py-1 rounded-full">
                       {item.badge}
@@ -223,22 +306,30 @@ const Sidebar: React.FC<SidebarProps> = ({
                   <span className="text-white font-bold text-sm">{getDisplayInitial()}</span>
                 </div>
               </div>
-              
+
               {!isCollapsed && (
                 <div className="ml-3 flex-1">
-                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{currentUser.name}</p>
+                  <div className="flex items-center">
+                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {currentUser.name}
+                    </p>
+                    {isAdmin && (
+                      <span className="ml-2 text-xs bg-blue-100 text-blue-800 dark:bg-blue-800 dark:text-blue-100 px-2 py-0.5 rounded-full">
+                        Admin
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-gray-500 dark:text-gray-400">{currentUser.email}</p>
                   <div className="flex items-center justify-between mt-2">
                     <div className="flex items-center gap-2">
                       <button
                         onClick={handleLogout}
-                        className="text-xs text-gray-500 hover:text-gray-700 flex items-center"
+                        className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 flex items-center"
                       >
                         <LogOut className="h-3 w-3 mr-1" />
                         Sign out
                       </button>
                     </div>
-                    
                   </div>
                 </div>
               )}
@@ -257,7 +348,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             </button>
           </div>
         )}
-      </div>     
+      </div>
     </>
   );
 };

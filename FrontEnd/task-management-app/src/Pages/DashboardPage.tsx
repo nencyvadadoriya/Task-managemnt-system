@@ -1,11 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 import {
     LayoutDashboard,
     ListTodo,
-    Calendar as CalendarIcon,
-    Users,
     PlusCircle,
     AlertCircle,
     CheckCircle,
@@ -24,7 +22,6 @@ import {
     Building,
     Tag,
     Edit,
-    User,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -34,18 +31,26 @@ import AllTasksPage from './AllTasksPage';
 import CalendarView from './CalendarView';
 import TeamPage from './TeamPage';
 import UserProfilePage from './UserProfilePage';
+import BrandsListPage from './BrandsListPage';
+import BrandDetailPage from './BrandDetailPage';
+import AdvancedFilters from './AdvancedFilters';
 
 import type {
+    Brand,
     CommentType,
-    NavigationItem,
+    Company,
     Task,
     TaskHistory,
     TaskPriority,
     TaskStatus,
+    TaskTypeItem,
     UserType,
 } from '../Types/Types';
 import { taskService } from '../Services/Task.services';
 import { authService } from '../Services/User.Services';
+import { brandService } from '../Services/Brand.service';
+import { companyService } from '../Services/Company.service';
+import { taskTypeService } from '../Services/TaskType.service';
 import { routepath } from '../Routes/route';
 
 interface NewTaskForm {
@@ -95,30 +100,27 @@ interface FilterState {
 
 const DashboardPage = () => {
     const navigate = useNavigate();
+    const location = useLocation();
 
     const [tasks, setTasks] = useState<Task[]>([]);
     const [selectedStatFilter, setSelectedStatFilter] = useState<string>('all');
     const [showAddTaskModal, setShowAddTaskModal] = useState(false);
     const [showEditTaskModal, setShowEditTaskModal] = useState(false);
+    const [showBulkBrandModal, setShowBulkBrandModal] = useState(false);
     const [editingTask, setEditingTask] = useState<Task | null>(null);
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [showLogout, setShowLogout] = useState(false);
     const [users, setUsers] = useState<UserType[]>([]);
+    const [apiBrands, setApiBrands] = useState<Brand[]>([]);
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [isCreatingTask, setIsCreatingTask] = useState(false);
     const [isUpdatingTask, setIsUpdatingTask] = useState(false);
-    const [currentView, setCurrentView] = useState<'dashboard' | 'all-tasks' | 'calendar' | 'team' | 'profile'>('dashboard');
+    const [currentView, setCurrentView] = useState<'dashboard' | 'all-tasks' | 'calendar' | 'team' | 'profile' | 'brands' | 'brand-detail'>('dashboard');
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-
-    // User management state
-    // const [showEditUserModal, setShowEditUserModal] = useState(false);
-    // const [showAddUserModal, setShowAddUserModal] = useState(false);
-    // const [editingUser, setEditingUser] = useState<UserType | null>(null);
-    // const [newUserForm, setNewUserForm] = useState<Partial<UserType>>({ ... });
-
+    const [selectedBrandId, setSelectedBrandId] = useState<string | null>(null);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
     const [currentUser, setCurrentUser] = useState<UserType>({
@@ -134,14 +136,20 @@ const DashboardPage = () => {
         lastLogin: new Date().toISOString(),
     });
 
+    const isAdmin = useMemo(() => (currentUser?.role || '').toLowerCase() === 'admin', [currentUser?.role]);
+    const isAdminOrManager = useMemo(() => {
+        const role = (currentUser?.role || '').toLowerCase();
+        return role === 'admin' || role === 'manager';
+    }, [currentUser?.role]);
+
     const [newTask, setNewTask] = useState<NewTaskForm>({
         title: '',
         description: '',
         assignedTo: '',
         dueDate: '',
         priority: 'medium',
-        taskType: 'regular',
-        companyName: 'company name',
+        taskType: '',
+        companyName: '',
         brand: '',
     });
 
@@ -152,15 +160,25 @@ const DashboardPage = () => {
         assignedTo: '',
         dueDate: '',
         priority: 'medium',
-        taskType: 'regular',
-        companyName: 'company name',
+        taskType: '',
+        companyName: '',
         brand: '',
         status: 'pending'
     });
 
     const [formErrors, setFormErrors] = useState<Record<string, string>>({});
     const [editFormErrors, setEditFormErrors] = useState<Record<string, string>>({});
+    const [bulkBrandForm, setBulkBrandForm] = useState({ company: '', brandNames: '' });
+    const [isCreatingBulkBrands, setIsCreatingBulkBrands] = useState(false);
+    const [showBulkCompanyModal, setShowBulkCompanyModal] = useState(false);
+    const [bulkCompanyNames, setBulkCompanyNames] = useState('');
+    const [isCreatingBulkCompanies, setIsCreatingBulkCompanies] = useState(false);
+    const [showBulkTaskTypeModal, setShowBulkTaskTypeModal] = useState(false);
+    const [bulkTaskTypeNames, setBulkTaskTypeNames] = useState('');
+    const [isCreatingBulkTaskTypes, setIsCreatingBulkTaskTypes] = useState(false);
 
+    const [companies, setCompanies] = useState<Company[]>([]);
+    const [taskTypes, setTaskTypes] = useState<TaskTypeItem[]>([]);
     const [filters, setFilters] = useState<FilterState>({
         status: 'all',
         priority: 'all',
@@ -187,13 +205,41 @@ const DashboardPage = () => {
         `;
     }, []);
 
-    const companyBrands = useMemo(() => ({
-        'acs': ['Chips', 'Soy', 'Saffola', 'Lays', 'Pepsi', '7Up'],
-        'md inpex': ['Inpex Pro', 'Inpex Lite', 'Inpex Max'],
-        'tech solutions': ['TechX', 'TechPro', 'TechLite'],
-        'global inc': ['Global Pro', 'Global Elite', 'Global Standard'],
-        'company name': ['Standard', 'Premium', 'Enterprise'],
-    }), []);
+    const brands = useMemo(() => {
+        return [...apiBrands];
+    }, [apiBrands]);
+
+    const availableCompanies = useMemo(() => {
+        const fromCompanies = (companies || []).map(c => (c?.name || '').toString().trim()).filter(Boolean);
+        if (fromCompanies.length > 0) {
+            return [...new Set(fromCompanies)].sort();
+        }
+
+        const uniqueCompanies = [...new Set(brands.map(brand => brand.company))];
+        return uniqueCompanies.filter(Boolean).sort();
+    }, [brands, companies]);
+
+    const availableTaskTypes = useMemo(() => {
+        const normalized = (taskTypes || [])
+            .map(t => (t?.name || '').toString().trim())
+            .filter(Boolean);
+
+        if (normalized.length > 0) {
+            return [...new Set(normalized)].sort((a, b) => a.localeCompare(b));
+        }
+
+        return [];
+    }, [taskTypes]);
+
+    const availableBrands = useMemo(() => {
+        if (filters.company === 'all') {
+            return brands.map(brand => brand.name).sort();
+        }
+        return brands
+            .filter(brand => brand.company.toLowerCase() === filters.company.toLowerCase())
+            .map(brand => brand.name)
+            .sort();
+    }, [brands, filters.company]);
 
     const formatDate = useCallback((dateString: string) => {
         try {
@@ -207,6 +253,60 @@ const DashboardPage = () => {
             return 'Invalid Date';
         }
     }, []);
+
+    const isMongoObjectId = useCallback((value: unknown) => {
+        if (typeof value !== 'string') return false;
+        return /^[a-f\d]{24}$/i.test(value);
+    }, []);
+
+    const navigateTo = (page: string) => {
+        const viewMap: Record<string, 'dashboard' | 'all-tasks' | 'calendar' | 'team' | 'profile' | 'brands' | 'brand-detail'> = {
+            'dashboard': 'dashboard',
+            'tasks': 'all-tasks',
+            'all-tasks': 'all-tasks',
+            'calendar': 'calendar',
+            'team': 'team',
+            'profile': 'profile',
+            'brands': 'brands',
+            'brand-detail': 'brand-detail'
+        };
+
+        const targetView = viewMap[page];
+        if (targetView) {
+            setCurrentView(targetView);
+        }
+    };
+
+    useEffect(() => {
+        const path = (location.pathname || '').toLowerCase();
+        if (path === routepath.tasks) {
+            setCurrentView('all-tasks');
+            return;
+        }
+        if (path === routepath.calendar) {
+            setCurrentView('calendar');
+            return;
+        }
+        if (path === routepath.team) {
+            setCurrentView('team');
+            return;
+        }
+        if (path === routepath.profile) {
+            setCurrentView('profile');
+            return;
+        }
+        if (path === routepath.brands) {
+            setCurrentView('brands');
+            return;
+        }
+        if (path.startsWith('/brands/')) {
+            setCurrentView('brand-detail');
+            return;
+        }
+        if (path === routepath.dashboard || path === '/') {
+            setCurrentView('dashboard');
+        }
+    }, [location.pathname]);
 
     const isOverdue = useCallback((dueDate: string, status: string) => {
         if (status === 'completed') return false;
@@ -254,7 +354,6 @@ const DashboardPage = () => {
         [currentUser],
     );
 
-    // User Management Functions
     const handleUpdateUser = useCallback(async (userId: string, updatedData: Partial<UserType>) => {
         if (currentUser?.role !== 'admin') {
             throw new Error('Only administrators can edit users');
@@ -317,7 +416,6 @@ const DashboardPage = () => {
 
         try {
             const response = await authService.deleteUser(userId);
-            // authService.deleteUser returns a response object, check for success
             const isSuccess = response && (response.success === true || !response.error);
 
             if (isSuccess) {
@@ -341,24 +439,21 @@ const DashboardPage = () => {
             }
 
             if (task.assignedTo) {
-                if (typeof task.assignedTo === 'object') {
+                if (typeof task.assignedTo === 'string') return {
+                    name: task.assignedTo.split('@')[0] || 'User',
+                    email: task.assignedTo,
+                };
+
+                if (typeof task.assignedTo === 'object' && task.assignedTo !== null) {
                     return {
                         name: task.assignedTo.name || 'User',
                         email: task.assignedTo.email,
                     };
                 }
 
-                const user = users.find((u) => u.email === task.assignedTo);
-                if (user) {
-                    return {
-                        name: user.name || user.email.split('@')[0] || 'User',
-                        email: user.email,
-                    };
-                }
-
                 return {
-                    name: task.assignedTo.split('@')[0] || 'User',
-                    email: task.assignedTo,
+                    name: 'Unknown User',
+                    email: 'unknown@example.com',
                 };
             }
 
@@ -372,13 +467,23 @@ const DashboardPage = () => {
 
     const getAvailableBrands = useCallback(() => {
         const company = newTask.companyName;
-        return companyBrands[company as keyof typeof companyBrands] || [];
-    }, [newTask.companyName, companyBrands]);
+        if (!company) return [];
+
+        return brands
+            .filter(brand => brand.company.toLowerCase() === company.toLowerCase())
+            .map(brand => brand.name)
+            .sort();
+    }, [newTask.companyName, brands]);
 
     const getEditFormAvailableBrands = useCallback(() => {
         const company = editFormData.companyName;
-        return companyBrands[company as keyof typeof companyBrands] || [];
-    }, [editFormData.companyName, companyBrands]);
+        if (!company) return [];
+
+        return brands
+            .filter(brand => brand.company.toLowerCase() === company.toLowerCase())
+            .map(brand => brand.name)
+            .sort();
+    }, [editFormData.companyName, brands]);
 
     const handleSaveComment = useCallback(async (taskId: string, comment: string): Promise<CommentType> => {
         try {
@@ -399,14 +504,14 @@ const DashboardPage = () => {
                     updatedAt: commentData.updatedAt || commentData.createdAt || new Date().toISOString(),
                 };
 
-                toast.success('✅ Comment saved successfully!');
+                toast.success('Comment saved successfully!');
                 return formattedComment;
             } else {
                 toast.error(response.message || 'Failed to save comment');
                 throw new Error(response.message || 'Failed to save comment');
             }
         } catch (error: any) {
-            console.error('❌ Error saving comment:', error);
+            console.error('Error saving comment:', error);
 
             const mockComment: CommentType = {
                 id: `mock-${Date.now()}`,
@@ -420,7 +525,7 @@ const DashboardPage = () => {
                 updatedAt: new Date().toISOString(),
             };
 
-            toast.success('💾 Comment saved locally (offline mode)');
+            toast.success('Comment saved locally (offline mode)');
             return mockComment;
         }
     }, [currentUser]);
@@ -435,12 +540,12 @@ const DashboardPage = () => {
             const response = await taskService.deleteComment(taskId, commentId);
 
             if (response && response.success) {
-                toast.success('✅ Comment deleted successfully');
+                toast.success('Comment deleted successfully');
             } else {
                 toast.error(response?.message || 'Failed to delete comment');
             }
         } catch (error: any) {
-            console.error('❌ Error deleting comment:', error);
+            console.error('Error deleting comment:', error);
             toast.error('Failed to delete comment');
         }
     }, []);
@@ -468,7 +573,7 @@ const DashboardPage = () => {
             }
             return [];
         } catch (error: any) {
-            console.error('❌ Error fetching comments:', error);
+            console.error('Error fetching comments:', error);
             return [];
         }
     }, []);
@@ -522,23 +627,49 @@ const DashboardPage = () => {
         }
     }, [tasks, users]);
 
-    const handleAddTaskHistory = useCallback(async (taskId: string, history: Omit<TaskHistory, 'id' | 'timestamp'>) => {
-        try {
-            const response = await taskService.updateTask(taskId, {
-                note: history.description,
-            });
+    const handleAddTaskHistory = useCallback(
+        async (
+            taskId: string,
+            history: Omit<TaskHistory, 'id' | 'timestamp'>,
+            additionalData?: Record<string, any>
+        ) => {
+            try {
+                const payload = {
+                    ...history,
+                    additionalData,
+                };
 
-            if (!response.success) {
-                toast.error(response.message || 'Failed to record history');
-                return;
+                const response = await taskService.addTaskHistory(taskId, payload);
+
+                if (!response.success) {
+                    toast.error(response.message || 'Failed to record history');
+                    return;
+                }
+
+                if (response.data) {
+                    const entry: any = response.data;
+                    const normalized: TaskHistory = {
+                        ...history,
+                        id: entry.id || entry._id || `temp-${Date.now()}`,
+                        timestamp: entry.timestamp || entry.createdAt || new Date().toISOString(),
+                        ...(entry || {}),
+                    };
+
+                    setTasks(prev => prev.map(t =>
+                        t.id === taskId
+                            ? { ...t, history: [...(t.history || []), normalized] }
+                            : t
+                    ));
+                }
+
+                toast.success('History recorded');
+            } catch (error) {
+                console.error('Error adding history:', error);
+                toast.error('Failed to record history');
             }
-
-            toast.success('History recorded');
-        } catch (error) {
-            console.error('Error adding history:', error);
-            toast.error('Failed to record history');
-        }
-    }, []);
+        },
+        []
+    );
 
     const handleApproveTask = useCallback(async (taskId: string) => {
         try {
@@ -569,7 +700,7 @@ const DashboardPage = () => {
 
                 await handleAddTaskHistory(taskId, {
                     taskId,
-                    action: task.completedApproval ? 'approval_removed' : 'task_approved',
+                    action: task.completedApproval ? 'rejected_by_admin' : 'admin_approved',
                     description: `Task ${task.completedApproval ? 'approval removed' : 'approved'} by Admin ${currentUser.name}`,
                     userId: currentUser.id,
                     userName: currentUser.name,
@@ -580,7 +711,7 @@ const DashboardPage = () => {
                 toast.success(
                     task.completedApproval
                         ? 'Approval removed'
-                        : '✅ Task approved by admin!'
+                        : 'Task approved by admin!'
                 );
             } else {
                 toast.error(response.message || 'Failed to approve task');
@@ -621,7 +752,7 @@ const DashboardPage = () => {
 
                 await handleAddTaskHistory(taskId, {
                     taskId,
-                    action: completedApproval ? 'assigner_permanent_approved' : 'assigner_approval_removed',
+                    action: completedApproval ? 'assigner_permanent_approved' : 'permanent_approval_removed',
                     description: `Task ${completedApproval ? 'permanently approved' : 'permanent approval removed'} by Assigner ${currentUser.name}`,
                     userId: currentUser.id,
                     userName: currentUser.name,
@@ -631,8 +762,8 @@ const DashboardPage = () => {
 
                 toast.success(
                     completedApproval
-                        ? '✅ Task PERMANENTLY approved by assigner!'
-                        : '🔄 Permanent approval removed'
+                        ? 'Task PERMANENTLY approved by assigner!'
+                        : 'Permanent approval removed'
                 );
             } else {
                 toast.error(response.message || 'Failed to update approval status');
@@ -751,48 +882,6 @@ const DashboardPage = () => {
 
     const displayTasks = useMemo(() => getFilteredTasksByStat(), [getFilteredTasksByStat]);
 
-    const navigation: NavigationItem[] = useMemo(
-        () => [
-            {
-                name: 'Dashboard',
-                icon: LayoutDashboard,
-                current: currentView === 'dashboard',
-                onClick: () => setCurrentView('dashboard'),
-                badge: 0,
-            },
-            {
-                name: 'Tasks',
-                icon: ListTodo,
-                current: currentView === 'all-tasks',
-                onClick: () => setCurrentView('all-tasks'),
-                badge: tasks.filter((t) => t.status !== 'completed').length,
-            },
-            {
-                name: 'Calendar',
-                icon: CalendarIcon,
-                current: currentView === 'calendar',
-                onClick: () => setCurrentView('calendar'),
-                badge: 0,
-            },
-            {
-                name: 'Team',
-                icon: Users,
-                current: currentView === 'team',
-                onClick: () => setCurrentView('team'),
-                badge: users.length,
-                showForRoles: ['admin', 'manager'],
-            },
-            {
-                name: 'Profile',
-                icon: User,
-                current: currentView === 'profile',
-                onClick: () => setCurrentView('profile'),
-                badge: 0,
-            },
-        ],
-        [currentView, tasks, users],
-    );
-
     const stats: StatMeta[] = useMemo(() => {
         const userTasks = tasks.filter(task => {
             if (currentUser.role === 'admin') return true;
@@ -847,7 +936,7 @@ const DashboardPage = () => {
         ];
     }, [isOverdue, tasks, currentUser]);
 
-    const getPriorityColor = useCallback((priority: TaskPriority) => {
+    const getPriorityColor = useCallback((priority?: TaskPriority) => {
         switch (priority) {
             case 'high': return 'border-red-300 bg-red-50 text-red-700';
             case 'medium': return 'border-amber-300 bg-amber-50 text-amber-700';
@@ -866,26 +955,37 @@ const DashboardPage = () => {
     }, []);
 
     const getCompanyColor = useCallback((companyName?: string) => {
-        const company = companyName?.toLowerCase() || "";
+        const value = (companyName || '').toLowerCase().trim();
+        if (!value) return 'border-gray-300 bg-gray-50 text-gray-700';
 
-        switch (company) {
-            case 'acs': return 'border-purple-300 bg-purple-50 text-purple-700';
-            case 'md inpex': return 'border-indigo-300 bg-indigo-50 text-indigo-700';
-            case 'tech solutions': return 'border-cyan-300 bg-cyan-50 text-cyan-700';
-            case 'global inc': return 'border-emerald-300 bg-emerald-50 text-emerald-700';
-            default: return 'border-gray-300 bg-gray-50 text-gray-700';
-        }
+        const palette = [
+            'border-purple-300 bg-purple-50 text-purple-700',
+            'border-indigo-300 bg-indigo-50 text-indigo-700',
+            'border-blue-300 bg-blue-50 text-blue-700',
+            'border-emerald-300 bg-emerald-50 text-emerald-700',
+            'border-amber-300 bg-amber-50 text-amber-700',
+            'border-rose-300 bg-rose-50 text-rose-700',
+        ];
+
+        const hash = value.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+        return palette[hash % palette.length];
     }, []);
 
     const getBrandColor = useCallback((brand: string) => {
-        if (brand.toLowerCase().includes('pro')) return 'border-purple-300 bg-purple-50 text-purple-700';
-        if (brand.toLowerCase().includes('lite')) return 'border-blue-300 bg-blue-50 text-blue-700';
-        if (brand.toLowerCase().includes('max')) return 'border-red-300 bg-red-50 text-red-700';
-        if (brand.toLowerCase().includes('elite')) return 'border-amber-300 bg-amber-50 text-amber-700';
-        if (brand.toLowerCase().includes('standard')) return 'border-gray-300 bg-gray-50 text-gray-700';
-        if (brand.toLowerCase().includes('premium')) return 'border-emerald-300 bg-emerald-50 text-emerald-700';
-        if (brand.toLowerCase().includes('enterprise')) return 'border-indigo-300 bg-indigo-50 text-indigo-700';
-        return 'border-gray-300 bg-gray-50 text-gray-700';
+        const value = (brand || '').toLowerCase().trim();
+        if (!value) return 'border-gray-300 bg-gray-50 text-gray-700';
+
+        const palette = [
+            'border-purple-300 bg-purple-50 text-purple-700',
+            'border-indigo-300 bg-indigo-50 text-indigo-700',
+            'border-blue-300 bg-blue-50 text-blue-700',
+            'border-emerald-300 bg-emerald-50 text-emerald-700',
+            'border-amber-300 bg-amber-50 text-amber-700',
+            'border-rose-300 bg-rose-50 text-rose-700',
+        ];
+
+        const hash = value.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+        return palette[hash % palette.length];
     }, []);
 
     const getActiveFilterCount = useCallback(() => {
@@ -907,6 +1007,29 @@ const DashboardPage = () => {
             ...prev,
             [filterType]: value,
         }));
+
+        // If company changes, reset brand
+        if (filterType === 'company') {
+            setFilters(prev => ({
+                ...prev,
+                brand: 'all'
+            }));
+        }
+    }, []);
+
+    const handleAdvancedFilterChange = useCallback((filterType: string, value: string) => {
+        setFilters(prev => ({
+            ...prev,
+            [filterType]: value,
+        }));
+
+        // If company changes, reset brand
+        if (filterType === 'company') {
+            setFilters(prev => ({
+                ...prev,
+                brand: 'all'
+            }));
+        }
     }, []);
 
     const resetFilters = useCallback(() => {
@@ -993,6 +1116,16 @@ const DashboardPage = () => {
             }
         }
 
+        // Company validation
+        if (!newTask.companyName || newTask.companyName.trim() === '') {
+            errors.companyName = 'Company is required';
+        }
+
+        // Brand validation
+        if (!newTask.brand || newTask.brand.trim() === '') {
+            errors.brand = 'Brand is required';
+        }
+
         setFormErrors(errors);
         return Object.keys(errors).length === 0;
     }, [newTask]);
@@ -1077,6 +1210,39 @@ const DashboardPage = () => {
         }
     }, []);
 
+    const fetchBrands = useCallback(async () => {
+        try {
+            const response = await brandService.getBrands();
+            if (response && response.data) {
+                setApiBrands(response.data);
+            }
+        } catch (error) {
+            console.error('Failed to fetch brands:', error);
+        }
+    }, []);
+
+    const fetchCompanies = useCallback(async () => {
+        try {
+            const response = await companyService.getCompanies();
+            if (response && response.data) {
+                setCompanies(response.data as Company[]);
+            }
+        } catch (error) {
+            console.error('Failed to fetch companies:', error);
+        }
+    }, []);
+
+    const fetchTaskTypes = useCallback(async () => {
+        try {
+            const response = await taskTypeService.getTaskTypes();
+            if (response && response.data) {
+                setTaskTypes(response.data as TaskTypeItem[]);
+            }
+        } catch (error) {
+            console.error('Failed to fetch task types:', error);
+        }
+    }, []);
+
     const fetchCurrentUser = useCallback(async () => {
         try {
             const token = localStorage.getItem('token');
@@ -1097,18 +1263,7 @@ const DashboardPage = () => {
         }
     }, [navigate]);
 
-    useEffect(() => {
-        fetchCurrentUser();
-        fetchTasks();
-        fetchUsers();
-
-        const savedSidebarState = localStorage.getItem('sidebarCollapsed');
-        if (savedSidebarState) {
-            setIsSidebarCollapsed(JSON.parse(savedSidebarState));
-        }
-    }, [fetchCurrentUser, fetchTasks, fetchUsers]);
-
-    const getAssignedToValue = (assignedTo: any): string => {
+    const getAssignedToValue = useCallback((assignedTo: any): string => {
         if (!assignedTo) return '';
 
         if (typeof assignedTo === 'string') return assignedTo;
@@ -1118,7 +1273,27 @@ const DashboardPage = () => {
         }
 
         return '';
-    };
+    }, []);
+
+    const updateTaskInState = useCallback((updatedTask: Task) => {
+        setTasks(prev => prev.map(t =>
+            t.id === updatedTask.id ? updatedTask : t
+        ));
+    }, []);
+
+    useEffect(() => {
+        fetchCurrentUser();
+        fetchTasks();
+        fetchUsers();
+        fetchBrands();
+        fetchCompanies();
+        fetchTaskTypes();
+
+        const savedSidebarState = localStorage.getItem('sidebarCollapsed');
+        if (savedSidebarState) {
+            setIsSidebarCollapsed(JSON.parse(savedSidebarState));
+        }
+    }, [fetchCurrentUser, fetchTasks, fetchUsers, fetchBrands, fetchCompanies, fetchTaskTypes]);
 
     const handleOpenEditModal = useCallback((task: Task) => {
         setEditingTask(task);
@@ -1132,8 +1307,8 @@ const DashboardPage = () => {
             assignedTo: getAssignedToValue(task.assignedTo),
             dueDate: dueDate,
             priority: task.priority || 'medium',
-            taskType: task.taskType || 'regular',
-            companyName: task.companyName || 'company name',
+            taskType: task.taskType || '',
+            companyName: task.companyName || '',
             brand: task.brand || '',
             status: task.status || 'pending'
         });
@@ -1141,22 +1316,32 @@ const DashboardPage = () => {
         setEditFormErrors({});
         setShowEditTaskModal(true);
         setOpenMenuId(null);
-    }, []);
+    }, [getAssignedToValue]);
 
     const handleSaveTaskFromModal = useCallback(async () => {
         if (!validateForm()) return;
 
         setIsCreatingTask(true);
         try {
+            const selectedBrandObj = brands.find(b =>
+                b.name === newTask.brand && (b.company === newTask.companyName || (b as any).companyName === newTask.companyName)
+            );
+
+            const resolvedBrandId = (() => {
+                const candidate = (selectedBrandObj as any)?.id || (selectedBrandObj as any)?._id;
+                return isMongoObjectId(candidate) ? candidate : null;
+            })();
+
             const taskData = {
                 title: newTask.title,
                 description: newTask.description,
                 assignedTo: newTask.assignedTo,
                 dueDate: newTask.dueDate,
-                priority: newTask.priority,
+                priority: newTask.priority === 'urgent' ? 'high' : newTask.priority,
                 taskType: newTask.taskType,
                 companyName: newTask.companyName,
                 brand: newTask.brand,
+                brandId: resolvedBrandId,
                 status: 'pending' as TaskStatus,
                 assignedBy: currentUser.email,
                 assignedToUser: users.find(u => u.email === newTask.assignedTo),
@@ -1172,8 +1357,8 @@ const DashboardPage = () => {
                     assignedTo: '',
                     dueDate: '',
                     priority: 'medium',
-                    taskType: 'regular',
-                    companyName: 'company name',
+                    taskType: '',
+                    companyName: '',
                     brand: '',
                 });
                 toast.success('Task created successfully!');
@@ -1186,147 +1371,7 @@ const DashboardPage = () => {
         } finally {
             setIsCreatingTask(false);
         }
-    }, [newTask, currentUser, users, validateForm]);
-
-    const trackFieldChange = useCallback((originalTask: Task, updatedData: any): string[] => {
-        const changes: string[] = [];
-
-        const getOriginalAssignedTo = (task: Task): string => {
-            if (!task.assignedTo) return '';
-            if (typeof task.assignedTo === 'string') return task.assignedTo;
-            if (typeof task.assignedTo === 'object' && task.assignedTo !== null) {
-                return (task.assignedTo as any).email || (task.assignedTo as any).name || '';
-            }
-            return '';
-        };
-
-        const originalAssignedTo = getOriginalAssignedTo(originalTask);
-        const updatedAssignedTo = updatedData.assignedTo || '';
-
-        if (updatedData.title !== undefined && updatedData.title !== originalTask.title) {
-            changes.push(`Title changed from "${originalTask.title}" to "${updatedData.title}"`);
-        }
-
-        if (updatedData.description !== undefined && updatedData.description !== originalTask.description) {
-            changes.push('Description updated');
-        }
-
-        if (updatedAssignedTo && originalAssignedTo !== updatedAssignedTo) {
-            changes.push(`Assignee changed from ${originalAssignedTo} to ${updatedAssignedTo}`);
-        }
-
-        if (updatedData.dueDate !== undefined && updatedData.dueDate !== originalTask.dueDate) {
-            const oldDate = new Date(originalTask.dueDate).toLocaleDateString();
-            const newDate = new Date(updatedData.dueDate).toLocaleDateString();
-            changes.push(`Due date changed from ${oldDate} to ${newDate}`);
-        }
-
-        if (updatedData.priority !== undefined && updatedData.priority !== originalTask.priority) {
-            changes.push(`Priority changed from ${originalTask.priority} to ${updatedData.priority}`);
-        }
-
-        if (updatedData.taskType !== undefined && updatedData.taskType !== originalTask.taskType) {
-            changes.push(`Task type changed from ${originalTask.taskType} to ${updatedData.taskType}`);
-        }
-
-        if (updatedData.companyName !== undefined && updatedData.companyName !== originalTask.companyName) {
-            changes.push(`Company changed from ${originalTask.companyName} to ${updatedData.companyName}`);
-        }
-
-        if (updatedData.brand !== undefined && updatedData.brand !== originalTask.brand) {
-            changes.push(`Brand changed from ${originalTask.brand} to ${updatedData.brand}`);
-        }
-
-        if (updatedData.status !== undefined && updatedData.status !== originalTask.status) {
-            changes.push(`Status changed from ${originalTask.status} to ${updatedData.status}`);
-        }
-
-        return changes;
-    }, []);
-
-    const handleSaveEditedTask = useCallback(async () => {
-        if (!validateEditForm() || !editingTask) return;
-
-        setIsUpdatingTask(true);
-        try {
-            const updateData = {
-                title: editFormData.title,
-                description: editFormData.description,
-                assignedTo: editFormData.assignedTo,
-                dueDate: editFormData.dueDate,
-                priority: editFormData.priority,
-                taskType: editFormData.taskType,
-                companyName: editFormData.companyName,
-                brand: editFormData.brand,
-                status: editFormData.status,
-                assignedBy: editingTask.assignedBy,
-                assignedToUser: users.find(u => u.email === editFormData.assignedTo),
-            };
-
-            const changes = trackFieldChange(editingTask, updateData);
-
-            const response = await taskService.updateTask(editingTask.id, updateData);
-            if (response.success && response.data) {
-                setTasks(prev => prev.map(task =>
-                    task.id === editingTask.id ? response.data as Task : task
-                ));
-
-                if (changes && changes.length > 0) {
-                    const changeDescription = changes.join(', ');
-
-                    const safeUser = currentUser || {
-                        id: 'guest-user',
-                        name: 'Guest User',
-                        email: 'guest@example.com',
-                        role: 'user',
-                    };
-
-                    try {
-                        if (handleAddTaskHistory) {
-                            await handleAddTaskHistory(
-                                editingTask.id,
-                                {
-                                    taskId: editingTask.id,
-                                    action: 'task_edited',
-                                    description: `Task edited by ${safeUser.role} (${safeUser.name}): ${changeDescription}`,
-                                    userId: safeUser.id,
-                                    userName: safeUser.name,
-                                    userEmail: safeUser.email,
-                                    userRole: safeUser.role,
-                                }
-                            );
-                        }
-                    } catch (error) {
-                        console.error('Error adding edit history:', error);
-                    }
-                }
-
-                setShowEditTaskModal(false);
-                setEditingTask(null);
-                setEditFormData({
-                    id: '',
-                    title: '',
-                    description: '',
-                    assignedTo: '',
-                    dueDate: '',
-                    priority: 'medium',
-                    taskType: 'regular',
-                    companyName: 'company name',
-                    brand: '',
-                    status: 'pending'
-                });
-
-                toast.success('Task updated successfully!');
-            } else {
-                toast.error(response.message || 'Failed to update task');
-            }
-        } catch (error) {
-            console.error('Failed to update task:', error);
-            toast.error('Failed to update task');
-        } finally {
-            setIsUpdatingTask(false);
-        }
-    }, [editFormData, editingTask, currentUser, users, validateEditForm, handleAddTaskHistory]);
+    }, [brands, newTask, currentUser, users, validateForm, isMongoObjectId]);
 
     const handleBulkCreateTasks = useCallback(
         async (payloads: any[]): Promise<{ created: Task[]; failures: { index: number; rowNumber: number; title: string; reason: string }[] }> => {
@@ -1337,15 +1382,25 @@ const DashboardPage = () => {
                 const payload = payloads[index];
 
                 try {
+                    const selectedBrandObj = brands.find(b =>
+                        b.name === payload.brand && (b.company === payload.companyName || (b as any).companyName === payload.companyName)
+                    );
+
+                    const resolvedBrandId = (() => {
+                        const candidate = (selectedBrandObj as any)?.id || (selectedBrandObj as any)?._id;
+                        return isMongoObjectId(candidate) ? candidate : null;
+                    })();
+
                     const taskData = {
                         title: payload.title,
                         description: payload.description || '',
                         assignedTo: payload.assignedTo,
                         dueDate: payload.dueDate,
-                        priority: payload.priority,
-                        taskType: payload.taskType || 'regular',
-                        companyName: payload.companyName || 'company name',
+                        priority: payload.priority === 'urgent' ? 'high' : payload.priority,
+                        taskType: payload.taskType || '',
+                        companyName: payload.companyName || '',
                         brand: payload.brand || '',
+                        brandId: resolvedBrandId,
                         status: 'pending' as TaskStatus,
                         assignedBy: currentUser.email,
                         assignedToUser: users.find(u => u.email === payload.assignedTo),
@@ -1354,8 +1409,7 @@ const DashboardPage = () => {
                     const response = await taskService.createTask(taskData);
 
                     if (response.success && response.data) {
-                        const createdTask = response.data as Task;
-                        created.push(createdTask);
+                        created.push(response.data as Task);
                     } else {
                         failures.push({
                             index,
@@ -1370,7 +1424,7 @@ const DashboardPage = () => {
                         index,
                         rowNumber: payload.rowNumber ?? index + 1,
                         title: payload.title || 'Untitled Task',
-                        reason: error.message || 'Unexpected error while creating task',
+                        reason: error?.message || 'Unexpected error while creating task',
                     });
                 }
             }
@@ -1381,33 +1435,67 @@ const DashboardPage = () => {
 
             return { created, failures };
         },
-        [currentUser.email, users, setTasks]
+        [brands, currentUser, users, isMongoObjectId]
     );
 
-    const updateTaskInState = useCallback((updatedTask: Task) => {
-        setTasks(prev => prev.map(task =>
-            task.id === updatedTask.id
-                ? {
-                    ...task,
-                    ...updatedTask,
-                    assignedToUser: updatedTask.assignedToUser || task.assignedToUser,
-                }
-                : task
-        ));
-    }, [setTasks]);
+    const handleSaveEditedTask = useCallback(async () => {
+        if (!validateEditForm() || !editingTask) return;
 
-    const handleToggleTaskStatus = useCallback(async (
-        taskId: string,
-        currentStatus: TaskStatus,
-        doneByAdmin?: boolean
-    ) => {
+        setIsUpdatingTask(true);
+        try {
+            const selectedBrandObj = brands.find(b =>
+                b.name === editFormData.brand && (b.company === editFormData.companyName || (b as any).companyName === editFormData.companyName)
+            );
+
+            const resolvedBrandId = (() => {
+                const candidate = (selectedBrandObj as any)?.id || (selectedBrandObj as any)?._id;
+                return isMongoObjectId(candidate) ? candidate : null;
+            })();
+
+            const updateData = {
+                title: editFormData.title,
+                description: editFormData.description,
+                assignedTo: editFormData.assignedTo,
+                dueDate: editFormData.dueDate,
+                priority: editFormData.priority,
+                taskType: editFormData.taskType,
+                companyName: editFormData.companyName,
+                brand: editFormData.brand,
+                brandId: resolvedBrandId,
+                status: editFormData.status,
+                assignedToUser: users.find(u => u.email === editFormData.assignedTo),
+            };
+
+            const response = await taskService.updateTask(editFormData.id, updateData);
+
+            if (response.success && response.data) {
+                updateTaskInState(response.data as Task);
+                setShowEditTaskModal(false);
+                setEditingTask(null);
+                toast.success('Task updated successfully!');
+            } else {
+                toast.error(response.message || 'Failed to update task');
+            }
+        } catch (error) {
+            console.error('Failed to update task:', error);
+            toast.error('Failed to update task');
+        } finally {
+            setIsUpdatingTask(false);
+        }
+    }, [validateEditForm, editingTask, editFormData, brands, users, isMongoObjectId, updateTaskInState]);
+
+    const handleToggleTaskStatus = useCallback(async (taskId: string, currentStatus: TaskStatus, doneByAdmin: boolean = false) => {
         const task = tasks.find(t => t.id === taskId);
-        if (!task) return;
+        if (!task) {
+            toast.error('Task not found');
+            return;
+        }
 
-        if (task.completedApproval && !doneByAdmin) {
+        if (task.completedApproval && currentStatus === 'completed') {
             toast.error('This task has been permanently approved and cannot be changed');
             return;
         }
+
         if (!canMarkTaskDone(task) && !doneByAdmin) {
             toast.error('You can only mark tasks assigned to you as done');
             return;
@@ -1431,12 +1519,27 @@ const DashboardPage = () => {
             }
 
             updateTaskInState(response.data as Task);
+
+            try {
+                await handleAddTaskHistory(taskId, {
+                    taskId,
+                    action: newStatus === 'completed' ? 'marked_completed' : 'marked_pending',
+                    description: `Task marked as ${newStatus} by ${currentUser.name} (${currentUser.role})`,
+                    userId: currentUser.id,
+                    userName: currentUser.name,
+                    userEmail: currentUser.email,
+                    userRole: currentUser.role,
+                });
+            } catch (error) {
+                console.error('Error adding task history:', error);
+            }
+
             toast.success(`Task marked as ${newStatus}`);
         } catch (error) {
             console.error('Failed to update task status:', error);
             toast.error('Failed to update task');
         }
-    }, [tasks, canMarkTaskDone, updateTaskInState]);
+    }, [tasks, canMarkTaskDone, updateTaskInState, handleAddTaskHistory, currentUser]);
 
     const handleDeleteTask = useCallback(async (taskId: string) => {
         const task = tasks.find(t => t.id === taskId);
@@ -1518,43 +1621,6 @@ const DashboardPage = () => {
         }
     }, [tasks, canEditDeleteTask, updateTaskInState]);
 
-    const handleUpdateProfile = useCallback(async (updatedData: Partial<UserType>) => {
-        try {
-            const loadingToast = toast.loading('Updating profile...');
-
-            const updatedUser = {
-                ...currentUser,
-                ...updatedData,
-                updatedAt: new Date().toISOString()
-            };
-
-            if (authService.updateUser) {
-                const response = await authService.updateUser(currentUser.id, updatedUser);
-
-                toast.dismiss(loadingToast);
-
-                if (response.success) {
-                    setCurrentUser(updatedUser);
-                    localStorage.setItem('currentUser', JSON.stringify(updatedUser));
-                    toast.success('Profile updated successfully');
-                } else {
-                    toast.error(response.message || 'Failed to update profile');
-                }
-            } else {
-                await new Promise(resolve => setTimeout(resolve, 1000));
-
-                setCurrentUser(updatedUser);
-                localStorage.setItem('currentUser', JSON.stringify(updatedUser));
-
-                toast.dismiss(loadingToast);
-                toast.success('Profile updated successfully (demo)');
-            }
-        } catch (error) {
-            console.error('Error updating profile:', error);
-            toast.error('Failed to update profile');
-        }
-    }, [currentUser]);
-
     if (loading) {
         return (
             <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex">
@@ -1609,10 +1675,12 @@ const DashboardPage = () => {
                                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
                                         <div>
                                             <div className="flex items-center gap-3 mb-2">
-                                                <div className="h-8 w-8 bg-gray-300 rounded-xl"></div>
-                                                <div className="h-8 w-48 bg-gray-400 rounded"></div>
+                                                <div className="h-6 w-16 bg-gray-300 rounded-full"></div>
+                                                <div className="h-6 w-20 bg-gray-300 rounded-full"></div>
                                             </div>
-                                            <div className="h-4 w-64 bg-gray-300 rounded"></div>
+                                            <div className="h-4 w-64 bg-gray-300 rounded mb-3"></div>
+                                            <div className="h-4 w-full bg-gray-300 rounded mb-3"></div>
+                                            <div className="h-4 w-2/3 bg-gray-300 rounded"></div>
                                         </div>
                                         <div className="flex gap-3">
                                             <div className="h-10 w-32 bg-gray-300 rounded-xl"></div>
@@ -1701,7 +1769,7 @@ const DashboardPage = () => {
             <Sidebar
                 sidebarOpen={sidebarOpen}
                 setSidebarOpen={setSidebarOpen}
-                navigation={navigation}
+                navigateTo={navigateTo}
                 currentUser={currentUser}
                 handleLogout={() => {
                     localStorage.removeItem('token');
@@ -1710,6 +1778,7 @@ const DashboardPage = () => {
                 }}
                 isCollapsed={isSidebarCollapsed}
                 setIsCollapsed={setIsSidebarCollapsed}
+                currentView={currentView}
             />
 
             <div className={mainContentClasses}>
@@ -1758,7 +1827,7 @@ const DashboardPage = () => {
                                                     className="inline-flex items-center px-4 py-2.5 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 shadow-sm"
                                                 >
                                                     <Filter className="mr-2 h-4 w-4" />
-                                                    Filters
+                                                    Advanced Filters
                                                     {getActiveFilterCount() > 0 && (
                                                         <span className="ml-2 bg-blue-100 text-blue-600 text-xs font-semibold px-2 py-0.5 rounded-full">
                                                             {getActiveFilterCount()}
@@ -1783,154 +1852,19 @@ const DashboardPage = () => {
                                         </div>
                                     </div>
 
-                                    {showAdvancedFilters && (
-                                        <div className="mb-8 bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
-                                            <div className="flex items-center justify-between mb-4">
-                                                <div className="flex items-center gap-3">
-                                                    <Filter className="h-5 w-5 text-gray-600" />
-                                                    <h3 className="text-lg font-semibold text-gray-900">Advanced Filters</h3>
-                                                </div>
-                                                <div className="flex items-center gap-3">
-                                                    <button
-                                                        onClick={resetFilters}
-                                                        className="text-sm text-gray-500 hover:text-gray-700"
-                                                    >
-                                                        Clear all
-                                                    </button>
-                                                    <button
-                                                        onClick={() => setShowAdvancedFilters(false)}
-                                                        className="text-gray-400 hover:text-gray-600"
-                                                    >
-                                                        <X className="h-5 w-5" />
-                                                    </button>
-                                                </div>
-                                            </div>
-
-                                            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-4">
-                                                <div>
-                                                    <label className="block text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wider">
-                                                        Status
-                                                    </label>
-                                                    <select
-                                                        value={filters.status}
-                                                        onChange={(e) => handleFilterChange('status', e.target.value)}
-                                                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                                    >
-                                                        <option value="all">All Status</option>
-                                                        <option value="pending">Pending</option>
-                                                        <option value="in-progress">In Progress</option>
-                                                        <option value="completed">Completed</option>
-                                                    </select>
-                                                </div>
-
-                                                <div>
-                                                    <label className="block text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wider">
-                                                        Priority
-                                                    </label>
-                                                    <select
-                                                        value={filters.priority}
-                                                        onChange={(e) => handleFilterChange('priority', e.target.value)}
-                                                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                                    >
-                                                        <option value="all">All Priority</option>
-                                                        <option value="high">High</option>
-                                                        <option value="medium">Medium</option>
-                                                        <option value="low">Low</option>
-                                                    </select>
-                                                </div>
-
-                                                <div>
-                                                    <label className="block text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wider">
-                                                        Assigned
-                                                    </label>
-                                                    <select
-                                                        value={filters.assigned}
-                                                        onChange={(e) => handleFilterChange('assigned', e.target.value)}
-                                                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                                    >
-                                                        <option value="all">Everyone</option>
-                                                        <option value="assigned-to-me">Assigned To Me</option>
-                                                        <option value="assigned-by-me">Assigned By Me</option>
-                                                    </select>
-                                                </div>
-
-                                                <div>
-                                                    <label className="block text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wider">
-                                                        Due Date
-                                                    </label>
-                                                    <select
-                                                        value={filters.date}
-                                                        onChange={(e) => handleFilterChange('date', e.target.value)}
-                                                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                                    >
-                                                        <option value="all">All Dates</option>
-                                                        <option value="today">Today</option>
-                                                        <option value="week">This Week</option>
-                                                        <option value="overdue">Overdue</option>
-                                                    </select>
-                                                </div>
-
-                                                <div>
-                                                    <label className="block text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wider">
-                                                        Type
-                                                    </label>
-                                                    <select
-                                                        value={filters.taskType}
-                                                        onChange={(e) => handleFilterChange('taskType', e.target.value)}
-                                                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                                    >
-                                                        <option value="all">All Types</option>
-                                                        <option value="regular">Regular</option>
-                                                        <option value="troubleshoot">Troubleshoot</option>
-                                                        <option value="maintenance">Maintenance</option>
-                                                        <option value="development">Development</option>
-                                                    </select>
-                                                </div>
-
-                                                <div>
-                                                    <label className="block text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wider">
-                                                        Company
-                                                    </label>
-                                                    <select
-                                                        value={filters.company}
-                                                        onChange={(e) => handleFilterChange('company', e.target.value)}
-                                                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                                    >
-                                                        <option value="all">All Companies</option>
-                                                        <option value="acs">ACS</option>
-                                                        <option value="md inpex">MD Inpex</option>
-                                                        <option value="tech solutions">Tech Solutions</option>
-                                                        <option value="global inc">Global Inc</option>
-                                                    </select>
-                                                </div>
-
-                                                <div>
-                                                    <label className="block text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wider">
-                                                        Brand
-                                                    </label>
-                                                    <select
-                                                        value={filters.brand}
-                                                        onChange={(e) => handleFilterChange('brand', e.target.value)}
-                                                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                                    >
-                                                        <option value="all">All Brands</option>
-                                                        <option value="chips">Chips</option>
-                                                        <option value="soy">Soy</option>
-                                                        <option value="saffola">Saffola</option>
-                                                        <option value="lays">Lays</option>
-                                                        <option value="pepsi">Pepsi</option>
-                                                        <option value="7up">7Up</option>
-                                                        <option value="inpex pro">Inpex Pro</option>
-                                                        <option value="inpex lite">Inpex Lite</option>
-                                                        <option value="inpex max">Inpex Max</option>
-                                                        <option value="techx">TechX</option>
-                                                        <option value="techpro">TechPro</option>
-                                                        <option value="techlite">TechLite</option>
-                                                    </select>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
+                                    {/* Advanced Filters Component */}
+                                    <AdvancedFilters
+                                        filters={filters}
+                                        availableCompanies={availableCompanies}
+                                        availableTaskTypes={availableTaskTypes}
+                                        availableBrands={availableBrands}
+                                        users={users}
+                                        currentUser={currentUser}
+                                        onFilterChange={handleAdvancedFilterChange}
+                                        onResetFilters={resetFilters}
+                                        showFilters={showAdvancedFilters}
+                                        onToggleFilters={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                                    />
 
                                     <div className="mb-10">
                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
@@ -2041,13 +1975,6 @@ const DashboardPage = () => {
                                                             Clear filters
                                                         </button>
                                                     )}
-                                                    <button
-                                                        onClick={() => setShowAddTaskModal(true)}
-                                                        className="px-3 py-2 text-sm text-white bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg hover:from-blue-600 hover:to-blue-700 flex items-center gap-2"
-                                                    >
-                                                        <PlusCircle className="h-4 w-4" />
-                                                        Quick Add
-                                                    </button>
                                                 </div>
                                             </div>
                                         </div>
@@ -2119,7 +2046,7 @@ const DashboardPage = () => {
                                                                     <span className={`px-3 py-1 text-xs font-medium rounded-full border ${getStatusColor(task.status)}`}>
                                                                         {task.status}
                                                                         {task.completedApproval && (
-                                                                            <span className="ml-1 text-blue-500">✅</span>
+                                                                            <span className="ml-1 text-blue-500">By Admin</span>
                                                                         )}
                                                                     </span>
                                                                 </div>
@@ -2244,154 +2171,64 @@ const DashboardPage = () => {
                                                     </div>
                                                 ))}
                                         </div>
-                                    ) : (
-                                        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-                                            <div className="overflow-x-auto">
-                                                <table className="min-w-full divide-y divide-gray-200">
-                                                    <thead className="bg-gray-50">
-                                                        <tr>
-                                                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                                Task Details
-                                                            </th>
-                                                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                                Assignee
-                                                            </th>
-                                                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                                Due Date
-                                                            </th>
-                                                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                                Status
-                                                            </th>
-                                                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                                Priority
-                                                            </th>
-                                                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                                Actions
-                                                            </th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody className="bg-white divide-y divide-gray-200">
-                                                        {displayTasks
-                                                            .filter((task: Task) => {
-                                                                if (filters.taskType !== 'all') {
-                                                                    const filterType = filters.taskType.toLowerCase();
-                                                                    const taskType = (task.taskType || (task as any).type || '').toLowerCase();
-                                                                    if (taskType !== filterType) return false;
-                                                                }
+                                    ) : viewMode === 'list' ? (
+                                        <div className="space-y-4">
+                                            {displayTasks
+                                                .filter((task: Task) => {
+                                                    if (filters.taskType !== 'all') {
+                                                        const filterType = filters.taskType.toLowerCase();
+                                                        const taskType = (task.taskType || (task as any).type || '').toLowerCase();
+                                                        if (taskType !== filterType) return false;
+                                                    }
 
-                                                                if (filters.company !== 'all') {
-                                                                    const filterCompany = filters.company.toLowerCase();
-                                                                    const taskCompany = (task.companyName || (task as any).company || '').toLowerCase();
-                                                                    if (taskCompany !== filterCompany) return false;
-                                                                }
+                                                    if (filters.company !== 'all') {
+                                                        const filterCompany = filters.company.toLowerCase();
+                                                        const taskCompany = (task.companyName || (task as any).company || '').toLowerCase();
+                                                        if (taskCompany !== filterCompany) return false;
+                                                    }
 
-                                                                if (filters.brand !== 'all') {
-                                                                    const filterBrand = filters.brand.toLowerCase();
-                                                                    const taskBrand = (task.brand || '').toLowerCase();
-                                                                    if (taskBrand !== filterBrand) return false;
-                                                                }
+                                                    if (filters.brand !== 'all') {
+                                                        const filterBrand = filters.brand.toLowerCase();
+                                                        const taskBrand = (task.brand || '').toLowerCase();
+                                                        if (taskBrand !== filterBrand) return false;
+                                                    }
 
-                                                                return true;
-                                                            })
-                                                            .map((task) => (
-                                                                <tr key={task.id} className="hover:bg-gray-50 transition-colors">
-                                                                    <td className="px-6 py-4">
-                                                                        <div>
-                                                                            <div className="flex items-center gap-2 mb-1">
-                                                                                <span className="text-sm font-semibold text-gray-900">
-                                                                                    {task.title}
-                                                                                </span>
-                                                                                {task.completedApproval && (
-                                                                                    <span className="text-xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded-full">
-                                                                                        ✅ Approved
-                                                                                    </span>
-                                                                                )}
-                                                                                <span className={`px-2 py-0.5 text-xs rounded-full border ${getCompanyColor(task.companyName)}`}>
-                                                                                    {task.companyName}
-                                                                                </span>
-                                                                                {task.brand && (
-                                                                                    <span className={`px-2 py-0.5 text-xs rounded-full border ${getBrandColor(task.brand)}`}>
-                                                                                        {task.brand}
-                                                                                    </span>
-                                                                                )}
-                                                                            </div>
-                                                                            <div className="text-sm text-gray-500 truncate max-w-xs">
-                                                                                {task.description || 'No description'}
-                                                                            </div>
-                                                                            <div className="text-xs text-gray-400 mt-1 flex items-center gap-2">
-                                                                                <Tag className="h-3 w-3" />
-                                                                                {task.taskType}
-                                                                            </div>
-                                                                        </div>
-                                                                    </td>
-                                                                    <td className="px-6 py-4 whitespace-nowrap">
-                                                                        <div className="flex items-center gap-2">
-                                                                            <div className="w-8 h-8 rounded-full bg-gradient-to-r from-blue-500 to-blue-600 flex items-center justify-center text-white text-sm font-medium">
-                                                                                {getAssignedUserInfo(task).name.charAt(0)}
-                                                                            </div>
-                                                                            <div>
-                                                                                <div className="text-sm font-medium text-gray-900">
-                                                                                    {getAssignedUserInfo(task).name}
-                                                                                </div>
-                                                                                <div className="text-xs text-gray-500">
-                                                                                    {getAssignedUserInfo(task).email}
-                                                                                </div>
-                                                                            </div>
-                                                                        </div>
-                                                                    </td>
-                                                                    <td className="px-6 py-4 whitespace-nowrap">
-                                                                        <div className={`text-sm font-medium ${isOverdue(task.dueDate, task.status)
-                                                                            ? 'text-rose-600'
-                                                                            : 'text-gray-900'
-                                                                            }`}>
-                                                                            {formatDate(task.dueDate)}
-                                                                        </div>
-                                                                        <div className="text-xs text-gray-500">
-                                                                            {isOverdue(task.dueDate, task.status) ? 'Overdue' : 'On track'}
-                                                                        </div>
-                                                                    </td>
-                                                                    <td className="px-6 py-4 whitespace-nowrap">
-                                                                        <span className={`px-3 py-1 text-xs font-medium rounded-full border ${getStatusColor(task.status)}`}>
-                                                                            {task.status}
-                                                                        </span>
-                                                                    </td>
-                                                                    <td className="px-6 py-4 whitespace-nowrap">
-                                                                        <span className={`px-3 py-1 text-xs font-medium rounded-full border ${getPriorityColor(task.priority || 'medium')}`}>
-                                                                            {task.priority}
-                                                                        </span>
-                                                                    </td>
-                                                                    <td className="px-6 py-4 whitespace-nowrap">
-                                                                        <div className="flex items-center gap-2">
-                                                                            <button
-                                                                                onClick={() => handleToggleTaskStatus(task.id, task.status)}
-                                                                                disabled={!canMarkTaskDone(task)}
-                                                                                className={`px-3 py-1.5 text-xs font-medium rounded-lg ${canMarkTaskDone(task)
-                                                                                    ? task.status === 'completed'
-                                                                                        ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
-                                                                                        : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
-                                                                                    : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                                                                    }`}
-                                                                            >
-                                                                                {task.status === 'completed' ? 'Pending' : 'Complete'}
-                                                                            </button>
-                                                                            {canEditDeleteTask(task) && (
-                                                                                <button
-                                                                                    onClick={() => handleOpenEditModal(task)}
-                                                                                    className="px-3 py-1.5 text-xs font-medium bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 flex items-center gap-1"
-                                                                                >
-                                                                                    <Edit className="h-3 w-3" />
-                                                                                    Edit
-                                                                                </button>
-                                                                            )}
-                                                                        </div>
-                                                                    </td>
-                                                                </tr>
-                                                            ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
+                                                    return true;
+                                                })
+                                                .map((task: Task) => (
+                                                    <div
+                                                        key={task.id}
+                                                        className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 hover:shadow-md transition-all duration-200"
+                                                    >
+                                                        <div className="flex items-center justify-between">
+                                                            <div className="flex items-center space-x-4">
+                                                                <div className="flex items-center space-x-2">
+                                                                    <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(task.status)}`}>
+                                                                        {task.status}
+                                                                    </span>
+                                                                    <span className={`px-2 py-1 text-xs font-medium rounded-full ${getPriorityColor(task.priority || 'medium')}`}>
+                                                                        {task.priority}
+                                                                    </span>
+                                                                </div>
+                                                                <div>
+                                                                    <h3 className="font-medium text-gray-900">{task.title}</h3>
+                                                                    <p className="text-sm text-gray-500">{getAssignedUserInfo(task).name}</p>
+                                                                </div>
+                                                            </div>
+                                                            <div className="flex items-center space-x-4">
+                                                                <span className="text-sm text-gray-500">{formatDate(task.dueDate)}</span>
+                                                                <button
+                                                                    onClick={() => handleOpenEditModal(task)}
+                                                                    className="p-1 text-gray-400 hover:text-gray-600"
+                                                                >
+                                                                    <Edit className="h-4 w-4" />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
                                         </div>
-                                    )}
+                                    ) : null}
                                 </>
                             ) : currentView === 'all-tasks' ? (
                                 <AllTasksPage
@@ -2402,6 +2239,11 @@ const DashboardPage = () => {
                                     setDateFilter={(value) => handleFilterChange('date', value)}
                                     assignedFilter={filters.assigned}
                                     setAssignedFilter={(value) => handleFilterChange('assigned', value)}
+                                    // NEW PROPS ADDED
+                                    advancedFilters={filters} // Pass complete filters object
+                                    onAdvancedFilterChange={(filterType: string, value: string) =>
+                                        handleFilterChange(filterType as keyof FilterState, value)
+                                    }
                                     searchTerm={searchTerm}
                                     setSearchTerm={setSearchTerm}
                                     currentUser={currentUser}
@@ -2430,6 +2272,13 @@ const DashboardPage = () => {
                                     onFetchTaskHistory={handleFetchTaskHistory}
                                     onBulkCreateTasks={handleBulkCreateTasks}
                                     isSidebarCollapsed={isSidebarCollapsed}
+                                    brands={brands}
+                                    // EDIT MODAL PROPS
+                                    showEditModal={showEditTaskModal}
+                                    editingTask={editingTask}
+                                    onOpenEditModal={handleOpenEditModal}
+                                    onCloseEditModal={() => setShowEditTaskModal(false)}
+                                    onSaveEditedTask={handleSaveEditedTask}
                                 />
                             ) : currentView === 'calendar' ? (
                                 <CalendarView
@@ -2484,11 +2333,25 @@ const DashboardPage = () => {
                             ) : currentView === 'profile' ? (
                                 <UserProfilePage
                                     user={currentUser}
-                                    tasks={tasks}
-                                    onUpdateProfile={handleUpdateProfile}
                                     formatDate={formatDate}
-                                    isOverdue={isOverdue}
+                                />
+                            ) : currentView === 'brands' ? (
+                                <BrandsListPage
                                     isSidebarCollapsed={isSidebarCollapsed}
+                                    currentUser={currentUser}
+                                    onSelectBrand={(brandId) => {
+                                        setSelectedBrandId(brandId);
+                                        setCurrentView('brand-detail');
+                                    }}
+                                />
+                            ) : currentView === 'brand-detail' ? (
+                                <BrandDetailPage
+                                    brandId={selectedBrandId || ''}
+                                    brands={apiBrands}
+                                    currentUser={currentUser}
+                                    isSidebarCollapsed={isSidebarCollapsed}
+                                    onBack={() => setCurrentView('brands')}
+                                    tasks={tasks}
                                 />
                             ) : null}
                         </div>
@@ -2602,24 +2465,28 @@ const DashboardPage = () => {
                                         )}
                                     </div>
 
-                                    <div className="grid grid-cols-2 gap-4">
+                                    {/* Improved Priority and Task Type Layout */}
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        {/* Priority Section - Left */}
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-900 mb-2">
-                                                Priority
-                                            </label>
+                                            <div className="flex items-center justify-between mb-2">
+                                                <label className="block text-sm font-medium text-gray-900">
+                                                    Priority
+                                                </label>
+                                            </div>
                                             <div className="grid grid-cols-3 gap-2">
                                                 {['low', 'medium', 'high'].map((priority) => (
                                                     <button
                                                         key={priority}
                                                         type="button"
                                                         onClick={() => handleInputChange('priority', priority as TaskPriority)}
-                                                        className={`py-2.5 text-xs font-medium rounded-lg border ${newTask.priority === priority
+                                                        className={`py-2.5 text-xs font-medium rounded-lg border transition-all ${newTask.priority === priority
                                                             ? priority === 'high'
-                                                                ? 'bg-rose-100 text-rose-700 border-rose-300'
+                                                                ? 'bg-rose-100 text-rose-700 border-rose-300 shadow-sm'
                                                                 : priority === 'medium'
-                                                                    ? 'bg-amber-100 text-amber-700 border-amber-300'
-                                                                    : 'bg-blue-100 text-blue-700 border-blue-300'
-                                                            : 'bg-gray-100 text-gray-600 border-gray-300'
+                                                                    ? 'bg-amber-100 text-amber-700 border-amber-300 shadow-sm'
+                                                                    : 'bg-blue-100 text-blue-700 border-blue-300 shadow-sm'
+                                                            : 'bg-gray-100 text-gray-600 border-gray-300 hover:bg-gray-50'
                                                             }`}
                                                     >
                                                         {priority.charAt(0).toUpperCase() + priority.slice(1)}
@@ -2628,70 +2495,164 @@ const DashboardPage = () => {
                                             </div>
                                         </div>
 
+                                        {/* Task Type Section - Right */}
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-900 mb-2">
-                                                Task Type
-                                            </label>
+                                            <div className="flex items-center justify-between mb-2">
+                                                <label className="block text-sm font-medium text-gray-900">
+                                                    Task Type
+                                                </label>
+                                                {isAdminOrManager && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setShowBulkTaskTypeModal(true)}
+                                                        className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 transition-colors"
+                                                    >
+                                                        <PlusCircle className="h-3 w-3" />
+                                                        Add Types
+                                                    </button>
+                                                )}
+                                            </div>
                                             <select
-                                                className="w-full px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                className={`w-full px-4 py-3 text-sm border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${availableTaskTypes.length === 0
+                                                    ? 'border-gray-200 bg-gray-50 text-gray-400'
+                                                    : 'border-gray-300 hover:border-gray-400'
+                                                    }`}
                                                 value={newTask.taskType}
                                                 onChange={e => handleInputChange('taskType', e.target.value)}
+                                                disabled={availableTaskTypes.length === 0}
                                             >
-                                                <option value="regular">Regular</option>
-                                                <option value="troubleshoot">Troubleshoot</option>
-                                                <option value="maintenance">Maintenance</option>
-                                                <option value="development">Development</option>
+                                                {availableTaskTypes.length === 0 ? (
+                                                    <option value="">No task types available</option>
+                                                ) : (
+                                                    <>
+                                                        <option value="" disabled>Select task type</option>
+                                                        {availableTaskTypes.map((typeName) => (
+                                                            <option key={typeName} value={typeName.toLowerCase()}>
+                                                                {typeName}
+                                                            </option>
+                                                        ))}
+                                                    </>
+                                                )}
                                             </select>
+                                            {availableTaskTypes.length === 0 && isAdminOrManager && (
+                                                <p className="mt-1 text-xs text-amber-600">
+                                                    Add task types to continue
+                                                </p>
+                                            )}
                                         </div>
                                     </div>
 
+                                    {/* Company Section - Full Width */}
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-900 mb-2">
-                                            Company
-                                        </label>
-                                        <div className="grid grid-cols-3 gap-2">
-                                            {['ACS', 'MD Inpex', 'Tech Solutions', 'Global Inc', 'Company'].map((company) => (
-                                                <button
-                                                    key={company}
-                                                    type="button"
-                                                    onClick={() => handleInputChange('companyName', company.toLowerCase())}
-                                                    className={`py-2.5 text-xs font-medium rounded-lg border ${newTask.companyName === company.toLowerCase()
-                                                        ? company === 'ACS'
-                                                            ? 'bg-purple-100 text-purple-700 border-purple-300'
-                                                            : company === 'MD Inpex'
-                                                                ? 'bg-indigo-100 text-indigo-700 border-indigo-300'
-                                                                : company === 'Tech Solutions'
-                                                                    ? 'bg-cyan-100 text-cyan-700 border-cyan-300'
-                                                                    : 'bg-gray-100 text-gray-700 border-gray-300'
-                                                        : 'bg-gray-50 text-gray-600 border-gray-200'
-                                                        }`}
-                                                >
-                                                    {company}
-                                                </button>
-                                            ))}
+                                        <div className="flex items-center justify-between mb-2">
+                                            <label className="block text-sm font-medium text-gray-900">
+                                                Company *
+                                            </label>
+                                            <div className="flex items-center gap-2">
+                                                {isAdminOrManager && (
+                                                    <>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setShowBulkCompanyModal(true)}
+                                                            className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+                                                        >
+                                                            <PlusCircle className="h-3 w-3" />
+                                                            Bulk Add
+                                                        </button>
+                                                    </>
+                                                )}
+                                            </div>
                                         </div>
-                                    </div>
 
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-900 mb-2">
-                                            Brand
-                                        </label>
                                         <select
-                                            className="w-full px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            value={newTask.companyName}
+                                            onChange={e => handleInputChange('companyName', e.target.value)}
+                                            className={`w-full px-4 py-3 text-sm border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 ${formErrors.companyName ? 'border-red-500' : 'border-gray-300'
+                                                }`}
+                                        >
+                                            <option value="">Select a company</option>
+                                            {availableCompanies.map(company => (
+                                                <option key={company} value={company}>
+                                                    {company}
+                                                </option>
+                                            ))}
+                                        </select>
+
+                                        {availableCompanies.length === 0 ? (
+                                            <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
+                                                <p className="text-xs text-yellow-700">
+                                                    No companies available. Add a company to get started.
+                                                </p>
+                                            </div>
+                                        ) : (
+                                            <p className="mt-1 text-xs text-gray-500">
+                                                {availableCompanies.length} companies available
+                                            </p>
+                                        )}
+
+                                        {formErrors.companyName && (
+                                            <p className="mt-1 text-sm text-red-600">{formErrors.companyName}</p>
+                                        )}
+                                    </div>
+
+                                    {/* Brand Section - Full Width */}
+                                    <div>
+                                        <div className="flex items-center justify-between mb-2">
+                                            <label className="block text-sm font-medium text-gray-900">
+                                                Brand *
+                                            </label>
+                                            {isAdminOrManager && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowBulkBrandModal(true)}
+                                                    className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+                                                >
+                                                    <PlusCircle className="h-3 w-3" />
+                                                    Bulk Add Brands
+                                                </button>
+                                            )}
+                                        </div>
+
+                                        <select
                                             value={newTask.brand}
                                             onChange={e => handleInputChange('brand', e.target.value)}
+                                            className={`w-full px-4 py-3 text-sm border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 ${formErrors.brand ? 'border-red-500' : 'border-gray-300'
+                                                }`}
                                             disabled={!newTask.companyName}
                                         >
                                             <option value="">Select a brand</option>
                                             {getAvailableBrands().map((brand) => (
-                                                <option key={brand} value={brand.toLowerCase()}>
+                                                <option key={brand} value={brand}>
                                                     {brand}
                                                 </option>
                                             ))}
                                         </select>
-                                        <p className="mt-1 text-xs text-gray-500">
-                                            Select a company first to see available brands
-                                        </p>
+
+                                        {newTask.companyName && (
+                                            <div className="mt-2">
+                                                {getAvailableBrands().length === 0 ? (
+                                                    <div className="p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
+                                                        <p className="text-xs text-yellow-700">
+                                                            No brands found for {newTask.companyName}. Add a brand to continue.
+                                                        </p>
+                                                    </div>
+                                                ) : (
+                                                    <p className="text-xs text-gray-500">
+                                                        {getAvailableBrands().length} brands available for {newTask.companyName}
+                                                    </p>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {!newTask.companyName && (
+                                            <p className="mt-1 text-xs text-gray-500">
+                                                Select a company first to see available brands
+                                            </p>
+                                        )}
+
+                                        {formErrors.brand && (
+                                            <p className="mt-1 text-sm text-red-600">{formErrors.brand}</p>
+                                        )}
                                     </div>
                                 </div>
                             </div>
@@ -2888,41 +2849,35 @@ const DashboardPage = () => {
                                                 value={editFormData.taskType}
                                                 onChange={e => handleEditInputChange('taskType', e.target.value)}
                                             >
-                                                <option value="regular">Regular</option>
-                                                <option value="troubleshoot">Troubleshoot</option>
-                                                <option value="maintenance">Maintenance</option>
-                                                <option value="development">Development</option>
+                                                {availableTaskTypes.map((typeName) => (
+                                                    <option key={typeName} value={typeName.toLowerCase()}>
+                                                        {typeName}
+                                                    </option>
+                                                ))}
                                             </select>
                                         </div>
                                     </div>
 
+                                    {/* Company */}
                                     <div>
                                         <label className="block text-sm font-medium text-gray-900 mb-2">
                                             Company
                                         </label>
-                                        <div className="grid grid-cols-3 gap-2">
-                                            {['ACS', 'MD Inpex', 'Tech Solutions', 'Global Inc', 'Company'].map((company) => (
-                                                <button
-                                                    key={company}
-                                                    type="button"
-                                                    onClick={() => handleEditInputChange('companyName', company.toLowerCase())}
-                                                    className={`py-2.5 text-xs font-medium rounded-lg border ${editFormData.companyName === company.toLowerCase()
-                                                        ? company === 'ACS'
-                                                            ? 'bg-purple-100 text-purple-700 border-purple-300'
-                                                            : company === 'MD Inpex'
-                                                                ? 'bg-indigo-100 text-indigo-700 border-indigo-300'
-                                                                : company === 'Tech Solutions'
-                                                                    ? 'bg-cyan-100 text-cyan-700 border-cyan-300'
-                                                                    : 'bg-gray-100 text-gray-700 border-gray-300'
-                                                        : 'bg-gray-50 text-gray-600 border-gray-200'
-                                                        }`}
-                                                >
+                                        <select
+                                            value={editFormData.companyName}
+                                            onChange={e => handleEditInputChange('companyName', e.target.value)}
+                                            className="w-full px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        >
+                                            <option value="">Select a company</option>
+                                            {availableCompanies.map(company => (
+                                                <option key={company} value={company}>
                                                     {company}
-                                                </button>
+                                                </option>
                                             ))}
-                                        </div>
+                                        </select>
                                     </div>
 
+                                    {/* Brand */}
                                     <div>
                                         <label className="block text-sm font-medium text-gray-900 mb-2">
                                             Brand
@@ -2935,14 +2890,16 @@ const DashboardPage = () => {
                                         >
                                             <option value="">Select a brand</option>
                                             {getEditFormAvailableBrands().map((brand) => (
-                                                <option key={brand} value={brand.toLowerCase()}>
+                                                <option key={brand} value={brand}>
                                                     {brand}
                                                 </option>
                                             ))}
                                         </select>
-                                        <p className="mt-1 text-xs text-gray-500">
-                                            Select a company first to see available brands
-                                        </p>
+                                        {!editFormData.companyName && (
+                                            <p className="mt-1 text-xs text-gray-500">
+                                                Select a company first to see available brands
+                                            </p>
+                                        )}
                                     </div>
                                 </div>
                             </div>
@@ -2984,7 +2941,422 @@ const DashboardPage = () => {
                 </div>
             )}
 
+            {/* Bulk Add Brands Modal */}
+            {showBulkBrandModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div
+                        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+                        onClick={() => setShowBulkBrandModal(false)}
+                    />
 
+                    <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
+                        <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 px-6 py-5">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-white/20 rounded-xl">
+                                        <Tag className="h-6 w-6 text-white" />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-xl font-semibold text-white">
+                                            Bulk Add Brands
+                                        </h3>
+                                        <p className="text-sm text-emerald-100 mt-0.5">
+                                            Add multiple brands for a company
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setShowBulkBrandModal(false)}
+                                    className="p-1.5 text-white hover:bg-white/20 rounded-lg"
+                                >
+                                    <X className="h-5 w-5" />
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="px-6 py-6 overflow-y-auto flex-1">
+                            <div className="space-y-6">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-900 mb-2">
+                                        Company *
+                                    </label>
+                                    <select
+                                        value={bulkBrandForm.company}
+                                        onChange={(e) => setBulkBrandForm(prev => ({ ...prev, company: e.target.value }))}
+                                        className="w-full px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                    >
+                                        <option value="">Select a company</option>
+                                        {availableCompanies.map(company => (
+                                            <option key={company} value={company}>
+                                                {company}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-900 mb-2">
+                                        Brand Names *
+                                    </label>
+                                    <textarea
+                                        placeholder="Enter brand names (comma or new line separated)\nExample:\nBrand 1, Brand 2, Brand 3\nor\nBrand 1\nBrand 2\nBrand 3"
+                                        className="w-full px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[150px]"
+                                        value={bulkBrandForm.brandNames}
+                                        onChange={(e) => setBulkBrandForm(prev => ({ ...prev, brandNames: e.target.value }))}
+                                    />
+                                    <p className="mt-1 text-xs text-gray-500">
+                                        Separate brand names with commas or new lines
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="px-6 py-5 bg-gray-50 border-t border-gray-200">
+                            <div className="flex justify-end gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowBulkBrandModal(false)}
+                                    className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={async () => {
+                                        if (!bulkBrandForm.company) {
+                                            toast.error('Please select a company');
+                                            return;
+                                        }
+
+                                        if (!bulkBrandForm.brandNames.trim()) {
+                                            toast.error('Please enter brand names');
+                                            return;
+                                        }
+
+                                        const requestedBrands = bulkBrandForm.brandNames
+                                            .split(/\r?\n|,/)
+                                            .map(s => s.trim())
+                                            .filter(Boolean);
+
+                                        if (requestedBrands.length === 0) {
+                                            toast.error('No valid brand names provided');
+                                            return;
+                                        }
+
+                                        const existingBrandsLower = new Set(
+                                            brands
+                                                .filter(b => b.company === bulkBrandForm.company)
+                                                .map(b => b.name.toLowerCase())
+                                        );
+
+                                        const toCreate = requestedBrands.filter(b => !existingBrandsLower.has(b.toLowerCase()));
+
+                                        if (toCreate.length === 0) {
+                                            toast.error('All brands already exist for this company');
+                                            return;
+                                        }
+
+                                        setIsCreatingBulkBrands(true);
+                                        try {
+                                            const created: Brand[] = [];
+                                            for (const brandName of toCreate) {
+                                                const res = await brandService.createBrand({
+                                                    name: brandName,
+                                                    company: bulkBrandForm.company,
+                                                    description: `Brand for ${bulkBrandForm.company}`,
+                                                    status: 'active',
+                                                });
+
+                                                if (res.success && res.data) {
+                                                    created.push(res.data);
+                                                }
+                                            }
+
+                                            if (created.length > 0) {
+                                                setApiBrands(prev => [...prev, ...created]);
+                                                setBulkBrandForm({ company: '', brandNames: '' });
+                                                setShowBulkBrandModal(false);
+                                                // Emit event to notify other components of brand updates
+                                                const event = new CustomEvent('brandUpdated', { detail: { brands: created } });
+                                                window.dispatchEvent(event);
+                                                // Refresh brands from backend to ensure latest data
+                                                fetchBrands();
+                                                toast.success(`${created.length} brand(s) added successfully!`);
+                                            } else {
+                                                toast.error('Failed to add brands');
+                                            }
+                                        } catch (err) {
+                                            console.error('Error bulk creating brands:', err);
+                                            toast.error('Failed to add brands');
+                                        } finally {
+                                            setIsCreatingBulkBrands(false);
+                                        }
+                                    }}
+                                    disabled={isCreatingBulkBrands}
+                                    className={`px-5 py-2.5 text-sm font-medium text-white rounded-xl ${isCreatingBulkBrands
+                                        ? 'bg-emerald-400 cursor-not-allowed'
+                                        : 'bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700'
+                                        }`}
+                                >
+                                    {isCreatingBulkBrands ? (
+                                        <span className="flex items-center gap-2">
+                                            <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                                            Adding Brands...
+                                        </span>
+                                    ) : (
+                                        <span className="flex items-center gap-2">
+                                            <Tag className="h-4 w-4" />
+                                            Add Brands
+                                        </span>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Bulk Add Companies Modal */}
+            {showBulkCompanyModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div
+                        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+                        onClick={() => setShowBulkCompanyModal(false)}
+                    />
+
+                    <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
+                        <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-6 py-5">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-white/20 rounded-xl">
+                                        <Building className="h-6 w-6 text-white" />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-xl font-semibold text-white">
+                                            Bulk Add Companies
+                                        </h3>
+                                        <p className="text-sm text-blue-100 mt-0.5">
+                                            Add multiple companies (comma or new line separated)
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setShowBulkCompanyModal(false)}
+                                    className="p-1.5 text-white hover:bg-white/20 rounded-lg"
+                                >
+                                    <X className="h-5 w-5" />
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="px-6 py-6 overflow-y-auto flex-1">
+                            <div className="space-y-6">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-900 mb-2">
+                                        Company Names *
+                                    </label>
+                                    <textarea
+                                        placeholder="Enter company names (comma or new line separated)\nExample:\nCompany A, Company B\nor\nCompany A\nCompany B"
+                                        className="w-full px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[150px]"
+                                        value={bulkCompanyNames}
+                                        onChange={(e) => setBulkCompanyNames(e.target.value)}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="px-6 py-5 bg-gray-50 border-t border-gray-200">
+                            <div className="flex justify-end gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowBulkCompanyModal(false)}
+                                    className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={async () => {
+                                        if (!bulkCompanyNames.trim()) {
+                                            toast.error('Please enter company names');
+                                            return;
+                                        }
+
+                                        const requested = bulkCompanyNames
+                                            .split(/\r?\n|,/)
+                                            .map(s => s.trim())
+                                            .filter(Boolean);
+
+                                        if (requested.length === 0) {
+                                            toast.error('No valid company names provided');
+                                            return;
+                                        }
+
+                                        setIsCreatingBulkCompanies(true);
+                                        try {
+                                            const res = await companyService.bulkUpsertCompanies({
+                                                companies: requested.map(name => ({ name }))
+                                            });
+
+                                            if (res.success && res.data) {
+                                                setCompanies(res.data as any);
+                                                setBulkCompanyNames('');
+                                                setShowBulkCompanyModal(false);
+                                                toast.success(`${res.data.length} company(ies) processed successfully!`);
+                                            } else {
+                                                toast.error('Failed to add companies');
+                                            }
+                                        } catch (err) {
+                                            console.error('Error bulk creating companies:', err);
+                                            toast.error('Failed to add companies');
+                                        } finally {
+                                            setIsCreatingBulkCompanies(false);
+                                        }
+                                    }}
+                                    disabled={isCreatingBulkCompanies}
+                                    className={`px-5 py-2.5 text-sm font-medium text-white rounded-xl ${isCreatingBulkCompanies
+                                        ? 'bg-blue-400 cursor-not-allowed'
+                                        : 'bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700'
+                                        }`}
+                                >
+                                    {isCreatingBulkCompanies ? (
+                                        <span className="flex items-center gap-2">
+                                            <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                                            Adding Companies...
+                                        </span>
+                                    ) : (
+                                        <span className="flex items-center gap-2">
+                                            <Building className="h-4 w-4" />
+                                            Add Companies
+                                        </span>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Bulk Add Task Types Modal */}
+            {showBulkTaskTypeModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div
+                        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+                        onClick={() => setShowBulkTaskTypeModal(false)}
+                    />
+
+                    <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
+                        <div className="bg-gradient-to-r from-indigo-500 to-indigo-600 px-6 py-5">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-white/20 rounded-xl">
+                                        <Tag className="h-6 w-6 text-white" />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-xl font-semibold text-white">
+                                            Bulk Add Task Types
+                                        </h3>
+                                        <p className="text-sm text-indigo-100 mt-0.5">
+                                            Add multiple task types (comma or new line separated)
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setShowBulkTaskTypeModal(false)}
+                                    className="p-1.5 text-white hover:bg-white/20 rounded-lg"
+                                >
+                                    <X className="h-5 w-5" />
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="px-6 py-6 overflow-y-auto flex-1">
+                            <div className="space-y-6">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-900 mb-2">
+                                        Task Types *
+                                    </label>
+                                    <textarea
+                                        placeholder="Enter task types (comma or new line separated)\nExample:\nBug, Feature\nor\nBug\nFeature"
+                                        className="w-full px-4 py-3 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 min-h-[150px]"
+                                        value={bulkTaskTypeNames}
+                                        onChange={(e) => setBulkTaskTypeNames(e.target.value)}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="px-6 py-5 bg-gray-50 border-t border-gray-200">
+                            <div className="flex justify-end gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowBulkTaskTypeModal(false)}
+                                    className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={async () => {
+                                        if (!bulkTaskTypeNames.trim()) {
+                                            toast.error('Please enter task types');
+                                            return;
+                                        }
+
+                                        const requested = bulkTaskTypeNames
+                                            .split(/\r?\n|,/)
+                                            .map(s => s.trim())
+                                            .filter(Boolean);
+
+                                        if (requested.length === 0) {
+                                            toast.error('No valid task types provided');
+                                            return;
+                                        }
+
+                                        setIsCreatingBulkTaskTypes(true);
+                                        try {
+                                            const res = await taskTypeService.bulkUpsertTaskTypes({
+                                                types: requested.map(name => ({ name }))
+                                            });
+
+                                            if (res.success && res.data) {
+                                                setTaskTypes(res.data as any);
+                                                setBulkTaskTypeNames('');
+                                                setShowBulkTaskTypeModal(false);
+                                                toast.success(`${res.data.length} task type(s) processed successfully!`);
+                                            } else {
+                                                toast.error('Failed to add task types');
+                                            }
+                                        } catch (err) {
+                                            console.error('Error bulk creating task types:', err);
+                                            toast.error('Failed to add task types');
+                                        } finally {
+                                            setIsCreatingBulkTaskTypes(false);
+                                        }
+                                    }}
+                                    disabled={isCreatingBulkTaskTypes}
+                                    className={`px-5 py-2.5 text-sm font-medium text-white rounded-xl ${isCreatingBulkTaskTypes
+                                        ? 'bg-indigo-400 cursor-not-allowed'
+                                        : 'bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700'
+                                        }`}
+                                >
+                                    {isCreatingBulkTaskTypes ? (
+                                        <span className="flex items-center gap-2">
+                                            <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                                            Adding Types...
+                                        </span>
+                                    ) : (
+                                        <span className="flex items-center gap-2">
+                                            <Tag className="h-4 w-4" />
+                                            Add Types
+                                        </span>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
